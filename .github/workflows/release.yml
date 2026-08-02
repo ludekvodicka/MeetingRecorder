@@ -60,6 +60,7 @@ jobs:
         run: |
           ruff check .
           pytest
+          python scripts/generate_third_party.py --check
         env:
           QT_QPA_PLATFORM: offscreen
 

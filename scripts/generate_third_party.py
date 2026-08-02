@@ -3,13 +3,14 @@
     python scripts/generate_third_party.py --write
     python scripts/generate_third_party.py --check
 
-The list is the runtime dependency table from pyproject.toml, so it is the same on every
-machine. Licences are read from the installed distribution when there is one, which is why
---check runs on a single CI runner: a dependency restricted to another platform is not
-installed here and its licence cannot be read. Such entries say so instead of guessing.
+The list is the runtime dependency table from pyproject.toml, and the output has to be
+identical on every machine or the CI check would pass on one runner and fail on the next.
+So a licence is read from the installed distribution only for dependencies that install
+everywhere. A dependency restricted to one platform cannot be read on the others, so it is
+never read at all, and the table names the restriction instead of guessing.
 
-CI runs --check so that adding or removing a dependency without regenerating this file
-fails the build.
+CI runs --check on all three runners, so adding or removing a dependency without
+regenerating this file fails the build.
 """
 
 import argparse
@@ -41,7 +42,8 @@ Run `pip download` or read each project's page for the full licence text and for
 dependencies these packages pull in.
 """
 
-NOT_INSTALLED = "restricted to another platform, see the package"
+PLATFORM_RESTRICTED = "see the package, it installs on one platform only"
+NOT_INSTALLED = "see the package, not installed here"
 
 
 def declared_dependencies():
@@ -82,9 +84,12 @@ def render():
     for name, specifier, marker in declared_dependencies():
         requirement = specifier or "any"
         platform_note = f" ({marker})" if marker else ""
+        # A marker-restricted dependency is absent on most machines, so reading its metadata
+        # would make this file differ per platform and break the check on every other runner.
+        licence = PLATFORM_RESTRICTED if marker else licence_of(name)
         rows.append(
             f"| [{name}](https://pypi.org/project/{name}/) | `{requirement}`{platform_note} "
-            f"| {licence_of(name)} |")
+            f"| {licence} |")
 
     table = ("| Package | Required | Licence |\n| --- | --- | --- |\n"
              + "\n".join(rows) + "\n")

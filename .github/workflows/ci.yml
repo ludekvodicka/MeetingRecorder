@@ -44,10 +44,9 @@ jobs:
           # There is no display, and the tests that touch Qt only need it to construct.
           QT_QPA_PLATFORM: offscreen
 
-      # Licences are read from installed distributions, and a dependency restricted to
-      # another platform is not installed here, so this is checked on one runner only.
+      # The generated table is identical on every platform by construction, so all three
+      # runners check it and a machine-specific slip cannot pass unnoticed.
       - name: Check the third-party inventory
-        if: runner.os == 'Linux'
         run: python scripts/generate_third_party.py --check
 
       - name: Check the version is well formed
