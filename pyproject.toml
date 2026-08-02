@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audio-recorder"
+dynamic = ["version"]
+description = "Desktop recorder for calls and meetings: captures system audio and the microphone together, transcribes with Soniox, and dictates into any application"
+readme = "README.md"
+# PyQt6 is GPL-3.0-only, and a build links it, so the distributed application is GPL v3.
+# Licensing the source anything more permissive would misdescribe what users receive.
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "ludekvodicka" }]
+keywords = ["audio", "recording", "transcription", "dictation", "soniox", "meetings"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    # No License classifier here on purpose: PEP 639 forbids one alongside the license
+    # expression above, and setuptools refuses to build the package if both are present.
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
+]
+
+dependencies = [
+    "PyQt6>=6.6",
+    "numpy>=1.24",
+    "soundfile>=0.12",
+    "av>=12.0",
+    "requests>=2.31",
+    "sounddevice>=0.4",
+    "websocket-client>=1.6",
+    "pyperclip>=1.8",
+    # Global push-to-talk needs the key release as well as the press, on all three
+    # platforms. The keyboard package only delivers that on Windows.
+    "pynput>=1.7",
+    "keyring>=24",
+    "platformdirs>=4",
+    # WASAPI loopback lives in this PyAudio fork and exists on Windows only. Every other
+    # platform captures through sounddevice/PortAudio instead.
+    "pyaudiowpatch>=0.2.12 ; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8.0",
+    "pyinstaller>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ludekvodicka/AudioRecorder"
+Issues = "https://github.com/ludekvodicka/AudioRecorder/issues"
+
+[project.gui-scripts]
+audio-recorder = "audiorecorder.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "audiorecorder.version.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["audiorecorder*"]
+
+[tool.setuptools.package-data]
+audiorecorder = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    # Qt callbacks and audio callbacks legitimately catch everything so a single bad frame
+    # cannot kill the stream or the UI thread.
+    "B008",
+]

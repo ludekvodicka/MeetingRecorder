@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Audio Recorder
+Comment=Record calls and meetings, transcribe them, and dictate into any application
+Exec=AudioRecorder
+Icon=audio-recorder
+Categories=AudioVideo;Audio;Recorder;
+Terminal=false

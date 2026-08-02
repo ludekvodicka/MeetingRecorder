@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest something the application should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the application makes hard or impossible?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: How it might work. A rough idea is fine.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: The workaround you are living with, if there is one.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform this matters on
+      multiple: true
+      options:
+        - Windows
+        - macOS
+        - Linux

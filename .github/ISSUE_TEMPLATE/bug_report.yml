@@ -1,0 +1,73 @@
+name: Bug report
+description: Something does not work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste an API key, a recording or a transcript into an issue. If a log line
+        matters, remove the parts you would not publish.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Settings and ...
+        2. Press Record
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: From the title bar or the bottom right corner of the window.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux (X11)
+        - Linux (Wayland)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you installed it
+      options:
+        - Downloaded from Releases
+        - Built from source
+    validations:
+      required: true
+
+  - type: textarea
+    id: audio-setup
+    attributes:
+      label: Audio setup
+      description: >
+        For anything touching recording: which system audio source and which microphone are
+        selected in Settings, and on macOS or Linux how you routed the system sound.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Console output, screenshots, or what you already ruled out.

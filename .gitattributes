@@ -1,0 +1,25 @@
+# Normalize all text files to LF in the repository and on checkout for every platform, so
+# generated-file checks (THIRD-PARTY.md) compare byte-for-byte on Windows CI, where git would
+# otherwise convert LF to CRLF and break the comparison.
+* text=auto eol=lf
+
+# Shell scripts must stay LF even on Windows checkouts, or bash refuses to run them.
+*.sh text eol=lf
+
+# Binary assets, never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.dmg binary
+*.exe binary
+*.AppImage binary
