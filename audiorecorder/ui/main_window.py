@@ -1,11 +1,13 @@
+import logging
 import os
 import shutil
 import threading
 import time
 
-from PyQt6.QtCore import QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -32,6 +34,33 @@ from audiorecorder.ui.overlay import OverlayWidget
 from audiorecorder.ui.recording_list import RecordingListWidget
 from audiorecorder.ui.settings_dialog import SettingsDialog
 from audiorecorder.version import __version__
+
+log = logging.getLogger(__name__)
+
+
+class DictationHotkeyFilter(QObject):
+    """Keeps Ctrl+Space away from the widgets while dictation is listening for it.
+
+    The dictation hotkey is global, so it fires wherever the user is typing. When that
+    happens to be this window, Qt ALSO delivers the keystroke to whatever widget has
+    keyboard focus, and a focused button is activated by the spacebar. The Dictation button
+    is usually the one, having just been clicked, so starting a dictation would immediately
+    switch dictation off again. A button activates on the key RELEASE, which is why the
+    recording appeared to start only once the keys were let go.
+    """
+
+    def __init__(self, is_listening):
+        super().__init__()
+        self._is_listening = is_listening
+
+    def eventFilter(self, obj, event):
+        if not self._is_listening():
+            return False
+        if event.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            return False
+        # bool(), because the modifier test yields a flag and eventFilter must return a bool.
+        return bool(event.key() == Qt.Key.Key_Space
+                    and event.modifiers() & Qt.KeyboardModifier.ControlModifier)
 
 
 class EncoderWorker(QObject):
@@ -76,6 +105,8 @@ class MainWindow(QMainWindow):
         self._dictation = None
         self._dictation_active = False
         self._overlay = OverlayWidget()
+        self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active)
+        QApplication.instance().installEventFilter(self._hotkey_filter)
 
         self.setWindowTitle(f"Audio Recorder - v{__version__}")
         self.setMinimumSize(600, 650)
@@ -618,6 +649,9 @@ class MainWindow(QMainWindow):
             self._overlay.set_state("idle")
             if self._dictation_active:
                 self._status_bar.showMessage("Dictation ON - Ctrl+Space to dictate")
+        elif state.startswith("notice:"):
+            self._overlay.set_state("idle")
+            self._status_bar.showMessage(state[7:], 5000)
         elif state.startswith("preview:"):
             preview = state[8:]
             if len(preview) > 60:
@@ -630,6 +664,9 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(f"Pasted: {text}", 5000)
 
     def _on_dictation_error(self, error):
+        # Logged as well as shown: the status bar clears itself after a few seconds, and a
+        # windowed build has no stderr to print to at all.
+        log.error("dictation failed: %s", error)
         self._status_bar.showMessage(f"Dictation error: {error}", 5000)
 
     def _add_files(self):

@@ -1,8 +1,11 @@
+import sys
+
 import pytest
 
 from audiorecorder.dictation.hotkeys import (
     HotkeyListener,
     PushToTalkStateMachine,
+    held_modifiers,
     normalize_key,
 )
 
@@ -110,6 +113,83 @@ class TestPushToTalk:
         machine.reset()
         press(machine, "space")
         assert machine.events == []
+
+
+class TestSyntheticPasteDoesNotDesyncModifiers:
+    """The paste after a dictation sends a synthetic Ctrl+V that our own global listener
+    sees. Without asking the operating system, that synthetic release clears a Ctrl the
+    user is still holding, and the next Ctrl+Space is ignored until they press Ctrl again.
+    """
+
+    def machine_with_probe(self, held):
+        events = []
+        m = PushToTalkStateMachine(
+            on_activate=lambda label: events.append(("start", label)),
+            on_release=lambda: events.append(("stop", None)),
+            modifier_probe=lambda: set(held),
+        )
+        m.events = events
+        return m
+
+    def test_second_dictation_works_after_a_synthetic_paste(self):
+        held = {"ctrl"}
+        m = self.machine_with_probe(held)
+
+        press(m, "ctrl", "space")
+        m.key_up("space")
+        # paste_text taps Ctrl+V, and the listener sees both halves of it
+        m.key_down("ctrl")
+        m.key_up("ctrl")
+        # the user, still holding Ctrl, presses space again
+        m.key_down("space")
+
+        assert m.events == [
+            ("start", "dictate"), ("stop", None), ("start", "dictate"),
+        ]
+
+    def test_synthetic_ctrl_release_does_not_end_a_live_dictation(self):
+        m = self.machine_with_probe({"ctrl"})
+        press(m, "ctrl", "space")
+        m.key_up("ctrl")  # synthetic, the user has not let go
+        assert m.events == [("start", "dictate")]
+        assert m.active
+
+    def test_a_real_ctrl_release_still_ends_it(self):
+        held = {"ctrl"}
+        m = self.machine_with_probe(held)
+        press(m, "ctrl", "space")
+        held.clear()  # the user really let go
+        m.key_up("ctrl")
+        assert m.events[-1] == ("stop", None)
+        assert not m.active
+
+    def test_the_probe_decides_translate_not_the_event_stream(self):
+        m = self.machine_with_probe({"ctrl", "shift"})
+        m.key_down("space")
+        assert m.events == [("start", "translate")]
+
+    def test_falls_back_to_tracking_when_the_platform_cannot_say(self):
+        events = []
+        m = PushToTalkStateMachine(
+            on_activate=lambda label: events.append(("start", label)),
+            on_release=lambda: events.append(("stop", None)),
+            modifier_probe=lambda: None,
+        )
+        m.key_down("ctrl")
+        m.key_down("space")
+        assert events == [("start", "dictate")]
+
+
+class TestHeldModifiers:
+    def test_returns_a_set_on_windows_and_none_elsewhere(self, monkeypatch):
+        monkeypatch.setattr("audiorecorder.dictation.hotkeys.sys.platform", "linux")
+        assert held_modifiers() is None
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+    def test_windows_reports_a_set_without_raising(self):
+        held = held_modifiers()
+        assert isinstance(held, set)
+        assert held <= {"ctrl", "shift"}
 
 
 class TestSupport:

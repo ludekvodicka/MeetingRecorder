@@ -17,9 +17,32 @@ nothing and is unit-tested. The listener only translates pynput keys into its vo
 import os
 import sys
 
+# Virtual key codes for the modifiers, either side of the keyboard.
+_WINDOWS_MODIFIER_KEYS = {"ctrl": 0x11, "shift": 0x10}
+
 
 class HotkeyUnsupportedError(RuntimeError):
     """No global hotkey is available. The message explains why, and is shown to the user."""
+
+
+def held_modifiers():
+    """Modifiers physically down right now, or None where the platform cannot say.
+
+    Tracking key events alone is not enough: pasting a dictation sends a synthetic Ctrl+V,
+    the global listener sees those events like any other, and the synthetic release would
+    clear a Ctrl the user is still holding. The next Ctrl+Space would then be ignored until
+    they let go and pressed Ctrl again. Asking the operating system avoids the whole class
+    of problem, and is what the previous implementation did.
+    """
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    return {
+        name for name, key in _WINDOWS_MODIFIER_KEYS.items()
+        if user32.GetAsyncKeyState(key) & 0x8000
+    }
 
 
 def normalize_key(key):
@@ -37,11 +60,16 @@ def normalize_key(key):
 
 
 class PushToTalkStateMachine:
-    """Which key combination starts and ends a dictation. No input library involved."""
+    """Which key combination starts and ends a dictation. No input library involved.
 
-    def __init__(self, on_activate, on_release):
+    ``modifier_probe`` returns the modifiers actually held, or None when the platform
+    cannot tell, in which case the ones seen in the event stream are used instead.
+    """
+
+    def __init__(self, on_activate, on_release, modifier_probe=None):
         self.on_activate = on_activate
         self.on_release = on_release
+        self._modifier_probe = modifier_probe
         self._modifiers = set()
         self._active = False
 
@@ -49,19 +77,35 @@ class PushToTalkStateMachine:
     def active(self):
         return self._active
 
+    def _held(self):
+        if self._modifier_probe is not None:
+            live = self._modifier_probe()
+            if live is not None:
+                return live
+        return self._modifiers
+
     def key_down(self, key):
         if key in ("ctrl", "shift"):
             self._modifiers.add(key)
-        elif key == "space" and "ctrl" in self._modifiers and not self._active:
-            self._active = True
-            self.on_activate("translate" if "shift" in self._modifiers else "dictate")
+        elif key == "space" and not self._active:
+            held = self._held()
+            if "ctrl" in held:
+                self._active = True
+                self.on_activate("translate" if "shift" in held else "dictate")
 
     def key_up(self, key):
         if key in ("ctrl", "shift"):
             self._modifiers.discard(key)
+        if not self._active:
+            return
         # Shift is deliberately not a release trigger: letting go of shift while still
         # holding Ctrl+Space should not cut the recording short.
-        if self._active and key in ("space", "ctrl"):
+        if key == "space":
+            self._active = False
+            self.on_release()
+        elif key == "ctrl" and "ctrl" not in self._held():
+            # A release the operating system disagrees with is our own synthetic paste
+            # keystroke, not the user letting go, and must not end the dictation.
             self._active = False
             self.on_release()
 
