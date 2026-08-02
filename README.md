@@ -93,7 +93,8 @@ certutil -hashfile Audio-Recorder-0.1.0-x64.exe SHA256      # Windows
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
   about an unknown publisher.
-- **macOS** - a `.dmg`. Gatekeeper refuses unsigned applications, so run
+- **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
+  On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
   `xattr -cr "/Applications/Audio Recorder.app"` after copying it across.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
