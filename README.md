@@ -1,10 +1,10 @@
-# Audio Recorder
+# Meeting Recorder
 
-[![CI](https://github.com/ludekvodicka/AudioRecorder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ludekvodicka/AudioRecorder/actions/workflows/ci.yml)
-[![Release build](https://github.com/ludekvodicka/AudioRecorder/actions/workflows/release.yml/badge.svg)](https://github.com/ludekvodicka/AudioRecorder/actions/workflows/release.yml)
-[![Latest release](https://img.shields.io/github/v/release/ludekvodicka/AudioRecorder)](https://github.com/ludekvodicka/AudioRecorder/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ludekvodicka/AudioRecorder/total)](https://github.com/ludekvodicka/AudioRecorder/releases)
-[![License](https://img.shields.io/github/license/ludekvodicka/AudioRecorder)](LICENSE)
+[![CI](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/ci.yml)
+[![Release build](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/release.yml/badge.svg)](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/ludekvodicka/MeetingRecorder)](https://github.com/ludekvodicka/MeetingRecorder/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ludekvodicka/MeetingRecorder/total)](https://github.com/ludekvodicka/MeetingRecorder/releases)
+[![License](https://img.shields.io/github/license/ludekvodicka/MeetingRecorder)](LICENSE)
 
 A desktop application that records a call from both sides at once: what comes out of your
 speakers and what goes into your microphone, mixed into one file. Afterwards it can send the
@@ -96,7 +96,7 @@ off there and the button says why. Recording and transcription are unaffected.
 ## Install
 
 Download the build for your platform from
-[Releases](https://github.com/ludekvodicka/AudioRecorder/releases).
+[Releases](https://github.com/ludekvodicka/MeetingRecorder/releases).
 
 **The builds are unsigned.** Check the SHA256 of your download against `SHA256SUMS.txt` in the
 same release before running it:
@@ -110,7 +110,7 @@ certutil -hashfile Audio-Recorder-0.1.0-x64.exe SHA256      # Windows
   about an unknown publisher.
 - **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
   On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
-  `xattr -cr "/Applications/Audio Recorder.app"` after copying it across.
+  `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 
@@ -148,7 +148,9 @@ own.
 The Soniox key is held by the operating system keyring: Credential Manager on Windows, Keychain
 on macOS, Secret Service on Linux. Settings live in your user configuration directory
 (`%LOCALAPPDATA%\AudioRecorder` on Windows, `~/Library/Application Support/AudioRecorder` on
-macOS, `~/.config/AudioRecorder` on Linux), never next to the executable.
+macOS, `~/.config/AudioRecorder` on Linux), never next to the executable. That directory and
+the keyring entry still carry the application's original name, so an upgrade finds the
+settings and the key that are already there.
 
 Recording a call may need everyone's consent where you live. That is on you, not on the tool.
 

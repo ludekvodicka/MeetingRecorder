@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through
-[GitHub security advisories](https://github.com/ludekvodicka/AudioRecorder/security/advisories/new)
+[GitHub security advisories](https://github.com/ludekvodicka/MeetingRecorder/security/advisories/new)
 rather than opening a public issue. Expect an acknowledgement within a week.
 
 This is a spare-time project with one maintainer, so there is no bounty and no guaranteed fix

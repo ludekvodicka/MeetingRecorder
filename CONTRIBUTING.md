@@ -1,4 +1,4 @@
-# Contributing to Audio Recorder
+# Contributing to Meeting Recorder
 
 Bug reports and focused pull requests are welcome. For security issues, follow
 [SECURITY.md](SECURITY.md) instead of opening a public issue.

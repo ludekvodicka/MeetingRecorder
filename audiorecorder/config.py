@@ -11,6 +11,8 @@ from pathlib import Path
 
 import platformdirs
 
+# "AudioRecorder", not the current product name: this decides where an existing
+# installation already keeps its settings. Renaming it would strand what is there.
 CONFIG_DIR = Path(platformdirs.user_config_dir("AudioRecorder", appauthor=False))
 CONFIG_PATH = CONFIG_DIR / "config.json"
 

@@ -12,8 +12,8 @@ import re
 
 import requests
 
-RELEASES_API = "https://api.github.com/repos/ludekvodicka/AudioRecorder/releases/latest"
-RELEASES_PAGE = "https://github.com/ludekvodicka/AudioRecorder/releases/latest"
+RELEASES_API = "https://api.github.com/repos/ludekvodicka/MeetingRecorder/releases/latest"
+RELEASES_PAGE = "https://github.com/ludekvodicka/MeetingRecorder/releases/latest"
 TIMEOUT_SECONDS = 5
 
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")

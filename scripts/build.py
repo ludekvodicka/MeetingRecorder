@@ -23,14 +23,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 RELEASE = ROOT / "release"
-SPEC = ROOT / "AudioRecorder.spec"
+SPEC = ROOT / "MeetingRecorder.spec"
 ASSETS = ROOT / "audiorecorder" / "assets"
 
 sys.path.insert(0, str(ROOT))
 from audiorecorder.version import __version__  # noqa: E402
 
-PRODUCT = "Audio Recorder"
-ARTIFACT_STEM = "Audio-Recorder"
+PRODUCT = "Meeting Recorder"
+ARTIFACT_STEM = "Meeting-Recorder"
 ICON_SIZES = (16, 32, 48, 64, 128, 256, 512, 1024)
 
 
@@ -85,7 +85,7 @@ def build():
 
 
 def package_windows():
-    executable = DIST / "AudioRecorder.exe"
+    executable = DIST / "MeetingRecorder.exe"
     if not executable.exists():
         raise SystemExit(f"{executable} is missing, run the build first")
     target = RELEASE / f"{ARTIFACT_STEM}-{__version__}-{arch_tag()}.exe"
@@ -111,25 +111,25 @@ def package_macos():
 
 
 def package_linux():
-    program = DIST / "AudioRecorder"
+    program = DIST / "MeetingRecorder"
     if not program.exists():
         raise SystemExit(f"{program} is missing, run the build first")
 
     tarball = RELEASE / f"{ARTIFACT_STEM}-{__version__}-linux-{arch_tag()}.tar.gz"
     tarball.unlink(missing_ok=True)
-    run(["tar", "-czf", str(tarball), "-C", str(DIST), "AudioRecorder"])
+    run(["tar", "-czf", str(tarball), "-C", str(DIST), "MeetingRecorder"])
 
-    appdir = DIST / "AudioRecorder.AppDir"
+    appdir = DIST / "MeetingRecorder.AppDir"
     if appdir.exists():
         shutil.rmtree(appdir)
     shutil.copytree(program, appdir / "usr" / "bin")
-    shutil.copy2(ROOT / "packaging" / "appimage" / "audio-recorder.desktop",
-                 appdir / "audio-recorder.desktop")
-    shutil.copy2(ASSETS / "icon.png", appdir / "audio-recorder.png")
+    shutil.copy2(ROOT / "packaging" / "appimage" / "meeting-recorder.desktop",
+                 appdir / "meeting-recorder.desktop")
+    shutil.copy2(ASSETS / "icon.png", appdir / "meeting-recorder.png")
     apprun = appdir / "AppRun"
     apprun.write_text(
         '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\n'
-        'exec "$HERE/usr/bin/AudioRecorder" "$@"\n', encoding="utf-8", newline="\n")
+        'exec "$HERE/usr/bin/MeetingRecorder" "$@"\n', encoding="utf-8", newline="\n")
     apprun.chmod(0o755)
 
     tool = shutil.which("appimagetool") or shutil.which("appimagetool-x86_64.AppImage")

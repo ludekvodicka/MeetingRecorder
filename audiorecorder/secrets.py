@@ -11,6 +11,8 @@ import os
 import keyring
 from keyring.errors import KeyringError
 
+# "AudioRecorder", not the current product name: this decides where an existing
+# installation already keeps the stored key. Renaming it would strand what is there.
 SERVICE = "AudioRecorder"
 ACCOUNT = "soniox-api-key"
 ENV_VAR = "SONIOX_API_KEY"

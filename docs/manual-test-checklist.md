@@ -41,7 +41,7 @@ and say in the release notes what was not exercised.
 - [ ] Cleanup on a transcript writes a `.summary.md` (needs the Claude CLI on PATH)
 - [ ] Without the Claude CLI on PATH, Cleanup fails with a readable message and no crash
 - [ ] Dictation on, hold Ctrl+Space, speak, release: the text is pasted where the caret is
-- [ ] The same again with the Audio Recorder window focused, and with the Dictation button
+- [ ] The same again with the Meeting Recorder window focused, and with the Dictation button
       the last thing clicked. The spacebar activates a focused button, so this is where
       dictation used to switch itself off the moment it started
 - [ ] The clipboard content you had before the dictation is back afterwards

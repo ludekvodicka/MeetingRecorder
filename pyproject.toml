@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "audio-recorder"
+name = "meeting-recorder"
 dynamic = ["version"]
 description = "Desktop recorder for calls and meetings: captures system audio and the microphone together, transcribes with Soniox, and dictates into any application"
 readme = "README.md"
@@ -54,11 +54,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ludekvodicka/AudioRecorder"
-Issues = "https://github.com/ludekvodicka/AudioRecorder/issues"
+Homepage = "https://github.com/ludekvodicka/MeetingRecorder"
+Issues = "https://github.com/ludekvodicka/MeetingRecorder/issues"
 
 [project.gui-scripts]
-audio-recorder = "audiorecorder.app:main"
+meeting-recorder = "audiorecorder.app:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "audiorecorder.version.__version__" }

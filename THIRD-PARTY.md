@@ -1,6 +1,6 @@
 # Third-party components
 
-Audio Recorder is distributed with the Python packages below, together with the
+Meeting Recorder is distributed with the Python packages below, together with the
 dependencies those packages bring in themselves. Each remains under its own licence, held
 by its own authors.
 

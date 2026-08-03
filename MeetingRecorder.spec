@@ -47,7 +47,7 @@ pyz = PYZ(a.pure)
 if sys.platform == "win32":
     exe = EXE(
         pyz, a.scripts, a.binaries, a.datas, [],
-        name="AudioRecorder",
+        name="MeetingRecorder",
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
@@ -66,7 +66,7 @@ elif sys.platform == "darwin":
     exe = EXE(
         pyz, a.scripts, [],
         exclude_binaries=True,
-        name="AudioRecorder",
+        name="MeetingRecorder",
         debug=False,
         strip=False,
         upx=True,
@@ -77,10 +77,10 @@ elif sys.platform == "darwin":
         codesign_identity=None,
         entitlements_file=None,
     )
-    collected = COLLECT(exe, a.binaries, a.datas, strip=False, upx=True, name="AudioRecorder")
+    collected = COLLECT(exe, a.binaries, a.datas, strip=False, upx=True, name="MeetingRecorder")
     app = BUNDLE(
         collected,
-        name="Audio Recorder.app",
+        name="Meeting Recorder.app",
         icon=str(ASSETS / "icon.icns"),
         bundle_identifier="io.github.ludekvodicka.audiorecorder",
         version=__version__,
@@ -89,7 +89,7 @@ elif sys.platform == "darwin":
             "CFBundleVersion": __version__,
             # Without this key macOS denies the microphone without even showing a prompt.
             "NSMicrophoneUsageDescription":
-                "Audio Recorder records your microphone for meetings and dictation.",
+                "Meeting Recorder records your microphone for meetings and dictation.",
             "NSHighResolutionCapable": True,
         },
     )
@@ -97,13 +97,13 @@ elif sys.platform == "linux":
     exe = EXE(
         pyz, a.scripts, [],
         exclude_binaries=True,
-        name="AudioRecorder",
+        name="MeetingRecorder",
         debug=False,
         strip=False,
         upx=True,
         console=False,
         disable_windowed_traceback=False,
     )
-    collected = COLLECT(exe, a.binaries, a.datas, strip=False, upx=True, name="AudioRecorder")
+    collected = COLLECT(exe, a.binaries, a.datas, strip=False, upx=True, name="MeetingRecorder")
 else:
     raise SystemExit(f"Unsupported platform: {sys.platform}")

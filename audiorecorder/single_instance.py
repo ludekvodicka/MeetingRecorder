@@ -13,6 +13,8 @@ import logging
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
+# The original product name, so a copy left running from an older build is still
+# recognised as the same application during an upgrade.
 SERVER_NAME = "AudioRecorder.single-instance"
 CONNECT_TIMEOUT_MS = 500
 

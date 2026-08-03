@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
         self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active)
         QApplication.instance().installEventFilter(self._hotkey_filter)
 
-        self.setWindowTitle(f"Audio Recorder - v{__version__}")
+        self.setWindowTitle(f"Meeting Recorder - v{__version__}")
         self.setMinimumSize(600, 650)
         self._build_ui()
         self._refresh_list()
@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
 
         # --- Header ---
         header = QHBoxLayout()
-        title = QLabel("Audio Recorder")
+        title = QLabel("Meeting Recorder")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         header.addWidget(title)
         header.addStretch()

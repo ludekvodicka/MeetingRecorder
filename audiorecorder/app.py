@@ -49,7 +49,7 @@ def main():
     save_config(cfg)
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Audio Recorder")
+    app.setApplicationName("Meeting Recorder")
     app.setStyle("Fusion")
     app.setWindowIcon(QIcon(str(asset_path("icon.svg"))))
 
