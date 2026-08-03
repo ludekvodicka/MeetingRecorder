@@ -146,14 +146,25 @@ def rms_level(data):
     return min(1.0, rms * 10)
 
 
-def create_backend():
-    if sys.platform == "win32":
+def create_backend(platform_name=None):
+    """Create the capture backend for ``platform_name`` or the running platform.
+
+    The optional name keeps platform routing testable without importing a foreign native
+    audio library into the current process.
+    """
+    if platform_name is None:
+        platform_name = sys.platform
+    if platform_name == "win32":
         from audiorecorder.audio.backend_wasapi import WasapiBackend
 
         return WasapiBackend()
-    elif sys.platform in ("darwin", "linux"):
+    elif platform_name == "darwin":
+        from audiorecorder.audio.backend_macos import MacOSBackend
+
+        return MacOSBackend()
+    elif platform_name == "linux":
         from audiorecorder.audio.backend_portaudio import PortAudioBackend
 
         return PortAudioBackend()
     else:
-        raise CaptureError(f"Unsupported platform: {sys.platform}")
+        raise CaptureError(f"Unsupported platform: {platform_name}")

@@ -1,12 +1,11 @@
-"""macOS and Linux capture through PortAudio.
+"""Routed-input capture through PortAudio.
 
-Neither platform exposes a loopback of its own, so the system track is an ordinary input
-device the user routes their output into:
+The system track is an ordinary input device the user routes their output into:
 
 * Linux - the ``.monitor`` source that PulseAudio or pipewire-pulse creates for every
   output. It appears in the input list like any microphone.
-* macOS - a virtual device such as BlackHole, with a multi-output device sending the sound
-  to both the speakers and the virtual device.
+* macOS compatibility path - a virtual device such as BlackHole, with a multi-output
+  device sending the sound to both the speakers and the virtual device.
 
 When no system source is configured, only the microphone is recorded and ``stop`` returns
 None for the system track.
