@@ -105,6 +105,7 @@ class EncoderWorker(QObject):
 class MainWindow(QMainWindow):
     _system_level_signal = pyqtSignal(float)
     _mic_level_signal = pyqtSignal(float)
+    _capture_error_signal = pyqtSignal(str)
     _update_available_signal = pyqtSignal(str)
 
     def __init__(self, config):
@@ -132,6 +133,7 @@ class MainWindow(QMainWindow):
 
         self._system_level_signal.connect(self._level_bars.set_system_level)
         self._mic_level_signal.connect(self._level_bars.set_mic_level)
+        self._capture_error_signal.connect(self._on_capture_error)
         self._update_available_signal.connect(self._on_update_available)
         self._start_update_check()
 
@@ -286,6 +288,9 @@ class MainWindow(QMainWindow):
                 lambda lvl: self._system_level_signal.emit(lvl),
                 lambda lvl: self._mic_level_signal.emit(lvl),
             )
+            self._capture.set_error_callback(
+                lambda message: self._capture_error_signal.emit(message)
+            )
             self._capture.start(
                 tmp_dir=self.config["output_dir"],
                 system_source=self.config.get("system_source_name"),
@@ -408,6 +413,17 @@ class MainWindow(QMainWindow):
             thread.start()
         else:
             self._status_bar.showMessage("Recording cancelled (no audio)")
+
+    def _on_capture_error(self, message):
+        if not self._is_recording:
+            return
+        log.error("capture failed while recording: %s", message)
+        self._stop_recording()
+        QMessageBox.warning(
+            self,
+            "Recording Stopped",
+            f"{message}\n\nRecording stopped immediately; a partial recording is being saved.",
+        )
 
     def _cleanup_encoder(self, entry):
         if entry in self._active_encoders:

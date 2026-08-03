@@ -169,7 +169,11 @@ def _stream_output_class():
     from Foundation import NSObject
 
     class MeetingRecorderStreamOutput(
-        NSObject, protocols=[objc.protocolNamed("SCStreamOutput")]
+        NSObject,
+        protocols=[
+            objc.protocolNamed("SCStreamOutput"),
+            objc.protocolNamed("SCStreamDelegate"),
+        ],
     ):
         def initWithOwner_(self, owner):
             self = objc.super(MeetingRecorderStreamOutput, self).init()
@@ -188,6 +192,9 @@ def _stream_output_class():
             except Exception:
                 log.exception("could not process a ScreenCaptureKit audio block")
 
+        def stream_didStopWithError_(self, stream, error):
+            self._owner._did_stop_with_error(error)
+
     _STREAM_OUTPUT_CLASS = MeetingRecorderStreamOutput
     return _STREAM_OUTPUT_CLASS
 
@@ -195,12 +202,26 @@ def _stream_output_class():
 class ScreenCaptureAudioStream:
     """Small start/stop adapter matching a sounddevice stream."""
 
-    def __init__(self, callback):
+    def __init__(self, callback, error_callback=None):
         self._callback = callback
+        self._error_callback = error_callback
         self._stream = None
         self._output = None
         self._queue = None
         self._running = False
+
+    def _did_stop_with_error(self, error):
+        """Handle an asynchronous stop reported by ScreenCaptureKit's delegate."""
+        if not self._running:
+            return
+        self._running = False
+        message = _error_text(error) or "unknown ScreenCaptureKit error"
+        log.error("system-audio capture stopped unexpectedly: %s", message)
+        if self._error_callback is not None:
+            try:
+                self._error_callback(f"System audio capture stopped unexpectedly: {message}")
+            except Exception:
+                log.exception("could not report the system-audio capture failure")
 
     def _build(self):
         import Quartz
@@ -235,7 +256,7 @@ class ScreenCaptureAudioStream:
         self._output = _stream_output_class().alloc().initWithOwner_(self)
         self._queue = _make_serial_queue("org.meetingrecorder.system-audio")
         self._stream = ScreenCaptureKit.SCStream.alloc().initWithFilter_configuration_delegate_(
-            content_filter, configuration, None
+            content_filter, configuration, self._output
         )
         added = self._stream.addStreamOutput_type_sampleHandlerQueue_error_(
             self._output,

@@ -45,7 +45,10 @@ class MacOSBackend(PortAudioBackend):
             format="WAV",
             subtype="FLOAT",
         )
-        self._system_stream = ScreenCaptureAudioStream(self._native_system_callback)
+        self._system_stream = ScreenCaptureAudioStream(
+            self._native_system_callback,
+            self._report_error,
+        )
         self._prepare_tap(CAPTURE_RATE)
 
     def start(self, tmp_dir, system_source, mic_source):

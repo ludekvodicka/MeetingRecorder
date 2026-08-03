@@ -23,15 +23,27 @@ class FakeCapture:
     def __init__(self):
         self.tap = None
         self.started = False
+        self.stopped = False
+        self.error_callback = None
 
     def set_level_callbacks(self, system, mic):
         pass
+
+    def set_error_callback(self, callback):
+        self.error_callback = callback
 
     def set_system_tap(self, callback):
         self.tap = callback
 
     def start(self, tmp_dir, system_source, mic_source):
         self.started = True
+
+    def stop(self):
+        self.stopped = True
+        return None, None
+
+    def close(self):
+        pass
 
     active_system_source = "Speakers"
     active_mic_source = "Microphone"
@@ -170,6 +182,23 @@ class TestNothingIsPaidForWhileOff:
 
         assert w.captures[0].started
         assert w._is_recording
+
+    def test_runtime_capture_failure_stops_the_recording(self, window, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(
+            mw.QMessageBox,
+            "warning",
+            lambda parent, title, message: warnings.append((title, message)),
+        )
+        w = window(rts_translate=False)
+        w._start_recording()
+
+        w.captures[0].error_callback("System audio capture stopped unexpectedly: test")
+
+        assert w.captures[0].stopped
+        assert not w._is_recording
+        assert warnings[0][0] == "Recording Stopped"
+        assert "partial recording is being saved" in warnings[0][1]
 
 
 class TestSwitchingOffMidRecording:

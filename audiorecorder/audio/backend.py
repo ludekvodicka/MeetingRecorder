@@ -55,6 +55,7 @@ class CaptureBackend(ABC):
     def __init__(self):
         self._system_level_callback = None
         self._mic_level_callback = None
+        self._error_callback = None
         self._mic_muted = False
         self._is_recording = False
         self._active_system_source = None
@@ -90,6 +91,19 @@ class CaptureBackend(ABC):
     def set_level_callbacks(self, system_callback, mic_callback):
         self._system_level_callback = system_callback
         self._mic_level_callback = mic_callback
+
+    def set_error_callback(self, callback):
+        """Receive fatal capture errors that happen after a stream has started."""
+        self._error_callback = callback
+
+    def _report_error(self, message):
+        """Notify the UI without allowing its callback to break an audio thread."""
+        if self._error_callback is None:
+            return
+        try:
+            self._error_callback(message)
+        except Exception:
+            log.exception("the capture error callback failed")
 
     def set_system_tap(self, callback):
         """Receive a copy of the system track as mono 16 kHz int16 bytes, None to stop.

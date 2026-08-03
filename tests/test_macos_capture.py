@@ -239,6 +239,24 @@ def test_missing_screen_capture_permission_is_requested(monkeypatch):
     assert requested == [True]
 
 
+def test_unexpected_native_stop_is_reported_once():
+    errors = []
+    stream = native.ScreenCaptureAudioStream(
+        lambda data: None,
+        errors.append,
+    )
+    stream._running = True
+    error = SimpleNamespace(localizedDescription=lambda: "display disconnected")
+
+    stream._did_stop_with_error(error)
+    stream._did_stop_with_error(error)
+
+    assert not stream._running
+    assert errors == [
+        "System audio capture stopped unexpectedly: display disconnected"
+    ]
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="ScreenCaptureKit exists only on macOS")
 def test_stream_output_delegate_class_is_reused():
     assert native._stream_output_class() is native._stream_output_class()
