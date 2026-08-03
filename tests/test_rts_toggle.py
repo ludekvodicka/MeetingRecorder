@@ -117,6 +117,8 @@ def window(app, tmp_path, monkeypatch):
     monkeypatch.setattr(mw.secrets, "get_api_key", lambda: "key")
     monkeypatch.setattr(mw, "DictationEngine", FakeDictation)
 
+    built = []
+
     def build(rts_translate):
         w = MainWindow({
             "output_dir": str(tmp_path),
@@ -125,9 +127,23 @@ def window(app, tmp_path, monkeypatch):
             "translation_target": "cs",
         })
         w.captures = captures
+        built.append(w)
         return w
 
     yield build
+
+    # Every window is closed, because closing is what takes its application-wide event
+    # filter back out. An abandoned window is collected while the filter is still
+    # installed, and Qt then calls the filter on a half-destroyed object and aborts the
+    # whole process. That is what broke the Linux and macOS release builds.
+    for w in built:
+        # Cleared first: closing while it is set asks the user whether to stop the
+        # recording, and nobody is here to answer.
+        w._is_recording = False
+        w._overlay.close()
+        w.close()
+        w.deleteLater()
+    app.processEvents()
 
 
 class TestNothingIsPaidForWhileOff:

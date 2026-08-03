@@ -76,3 +76,51 @@ class TestAgainstARealButton:
         button.close()
 
         assert clicks == [1], "a focused button really is activated by the spacebar"
+
+
+class TestTheFilterDoesNotOutliveItsWindow:
+    """An application-wide filter installed by a window that is then destroyed.
+
+    Qt goes on calling it, and calling a Python event filter whose owner has been
+    garbage-collected aborts the process. It happened during the v0.2.0 release build:
+    constructing one window triggered a collection of an earlier one, and Linux and macOS
+    died with SIGABRT inside eventFilter. Windows survived only by luck of timing.
+    """
+
+    def test_the_filter_belongs_to_the_window(self, app):
+        """Parented, so Qt destroys it with the window instead of leaving it registered."""
+        from PyQt6.QtWidgets import QWidget
+
+        owner = QWidget()
+        assert DictationHotkeyFilter(lambda: True, owner).parent() is owner
+
+    def test_a_closed_window_stops_filtering(self, app, monkeypatch, tmp_path):
+        from audiorecorder.ui import main_window as mw
+        from audiorecorder.ui.main_window import MainWindow
+
+        monkeypatch.setattr(mw, "save_config", lambda config: None)
+        monkeypatch.setattr(MainWindow, "_start_update_check", lambda self: None)
+        window = MainWindow({"output_dir": str(tmp_path), "rts_translate": False,
+                             "language": "en", "translation_target": "cs"})
+        window._dictation_active = True
+
+        button = QPushButton("elsewhere")
+        clicks = []
+        button.clicked.connect(lambda: clicks.append(1))
+        button.show()
+        button.setFocus()
+
+        def press_ctrl_space():
+            for kind in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                app.notify(button, key_event(kind, Qt.Key.Key_Space,
+                                             Qt.KeyboardModifier.ControlModifier))
+
+        press_ctrl_space()
+        assert clicks == [], "installed, so the button is not activated"
+
+        window._overlay.close()
+        window.close()
+
+        press_ctrl_space()
+        assert clicks == [1], "closed, so the filter is gone and the key gets through"
+        button.close()

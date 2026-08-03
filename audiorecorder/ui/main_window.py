@@ -63,8 +63,10 @@ class DictationHotkeyFilter(QObject):
     recording appeared to start only once the keys were let go.
     """
 
-    def __init__(self, is_listening):
-        super().__init__()
+    def __init__(self, is_listening, parent=None):
+        # Parented, so Qt destroys the filter with the window that owns it rather than
+        # leaving the application holding one whose owner has already gone.
+        super().__init__(parent)
         self._is_listening = is_listening
 
     def eventFilter(self, obj, event):
@@ -120,7 +122,7 @@ class MainWindow(QMainWindow):
         self._dictation_active = False
         self._subtitle_engine = None
         self._overlay = OverlayWidget()
-        self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active)
+        self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active, self)
         QApplication.instance().installEventFilter(self._hotkey_filter)
 
         self.setWindowTitle(f"Meeting Recorder - v{__version__}")
@@ -827,4 +829,8 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self._stop_recording()
+        # The filter is installed on the whole application, so it goes on being called
+        # after this window is gone. Qt then calls it on a half-destroyed object and
+        # aborts the process.
+        QApplication.instance().removeEventFilter(self._hotkey_filter)
         event.accept()
