@@ -4,6 +4,8 @@ import sys
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from audiorecorder.platform_tools import find_executable
+
 
 def _get_startupinfo():
     if sys.platform != "win32":
@@ -38,8 +40,11 @@ class CleanupWorker(QObject):
             )
 
             self.progress.emit("Running Claude cleanup...")
+            claude = find_executable("claude")
+            if claude is None:
+                raise FileNotFoundError("claude")
             result = subprocess.run(
-                ["claude", "-p", prompt,
+                [claude, "-p", prompt,
                  "--model", "sonnet",
                  "--dangerously-skip-permissions"],
                 cwd=transcript_dir,
@@ -66,6 +71,9 @@ class CleanupWorker(QObject):
         except subprocess.TimeoutExpired:
             self.error.emit("Claude CLI timed out after 10 minutes")
         except FileNotFoundError:
-            self.error.emit("Claude CLI not found. Make sure 'claude' is in PATH.")
+            self.error.emit(
+                "Claude CLI not found. Install Claude Code; desktop launches also search "
+                "Homebrew and standard per-user locations."
+            )
         except Exception as e:
             self.error.emit(str(e))

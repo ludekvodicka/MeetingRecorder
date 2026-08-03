@@ -6,6 +6,7 @@ directory that scripts/build.py turns into an AppImage. Nothing secret is bundle
 Soniox key lives in the keyring, and the settings live in the user's config directory.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -15,6 +16,8 @@ sys.path.insert(0, SPECPATH)
 from audiorecorder.version import __version__
 
 ASSETS = Path(SPECPATH) / "audiorecorder" / "assets"
+MACOS_ENTITLEMENTS = Path(SPECPATH) / "packaging" / "macos.entitlements"
+MACOS_CODESIGN_IDENTITY = os.environ.get("MACOS_CODESIGN_IDENTITY")
 
 datas = [(str(ASSETS), "audiorecorder/assets")]
 binaries = []
@@ -74,8 +77,8 @@ elif sys.platform == "darwin":
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
-        codesign_identity=None,
-        entitlements_file=None,
+        codesign_identity=MACOS_CODESIGN_IDENTITY,
+        entitlements_file=str(MACOS_ENTITLEMENTS),
     )
     collected = COLLECT(exe, a.binaries, a.datas, strip=False, upx=True, name="MeetingRecorder")
     app = BUNDLE(

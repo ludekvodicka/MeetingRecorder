@@ -8,11 +8,13 @@ PyInstaller only produces a program directory or a single executable. Turning th
 something a user can download is different on every platform, and that difference lives
 here rather than in the workflow file, so a release can be reproduced locally.
 
-Artifacts land in release/. Nothing here signs anything: the builds are unsigned by
-design, and adding signing is a change of its own.
+Artifacts land in release/. macOS builds are ad-hoc signed by default. Set
+MACOS_CODESIGN_IDENTITY to a Developer ID Application identity for distribution, and set
+MACOS_NOTARY_PROFILE to a notarytool keychain profile to notarize and staple the DMG.
 """
 
 import argparse
+import os
 import platform
 import shutil
 import subprocess
@@ -103,10 +105,28 @@ def package_macos():
     app = DIST / f"{PRODUCT}.app"
     if not app.exists():
         raise SystemExit(f"{app} is missing, run the build first")
+    notary_profile = os.environ.get("MACOS_NOTARY_PROFILE")
+    if notary_profile and not os.environ.get("MACOS_CODESIGN_IDENTITY"):
+        raise SystemExit(
+            "MACOS_NOTARY_PROFILE requires MACOS_CODESIGN_IDENTITY; Apple will not "
+            "notarize an ad-hoc signed application."
+        )
     target = RELEASE / f"{ARTIFACT_STEM}-{__version__}-{arch_tag()}.dmg"
     target.unlink(missing_ok=True)
+    run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)])
     run(["hdiutil", "create", "-volname", PRODUCT, "-srcfolder", str(app),
          "-ov", "-format", "UDZO", str(target)])
+    if notary_profile:
+        run([
+            "xcrun", "notarytool", "submit", str(target),
+            "--keychain-profile", notary_profile, "--wait",
+        ])
+        run(["xcrun", "stapler", "staple", str(target)])
+        run(["xcrun", "stapler", "validate", str(target)])
+        run([
+            "spctl", "--assess", "--type", "open", "--context",
+            "context:primary-signature", "--verbose=2", str(target),
+        ])
     return [target]
 
 
