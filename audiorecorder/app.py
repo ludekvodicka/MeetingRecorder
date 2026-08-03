@@ -41,8 +41,35 @@ def _configure_logging():
     logging.getLogger("websocket").setLevel(logging.INFO)
 
 
+def _runtime_smoke_test(platform_name=None):
+    """Import platform-only runtime pieces without touching hardware or user settings."""
+    if platform_name is None:
+        platform_name = sys.platform
+    if not asset_path("icon.svg").is_file():
+        raise RuntimeError("bundled application assets are missing")
+
+    if platform_name == "darwin":
+        import CoreAudio  # noqa: F401
+        import CoreMedia  # noqa: F401
+        import Quartz  # noqa: F401
+        import ScreenCaptureKit  # noqa: F401
+
+        from audiorecorder.audio.macos_screen_capture import _make_serial_queue
+
+        _make_serial_queue("org.meetingrecorder.smoke-test")
+    elif platform_name == "win32":
+        import pyaudiowpatch  # noqa: F401
+    elif platform_name == "linux":
+        import sounddevice  # noqa: F401
+    else:
+        raise RuntimeError(f"unsupported smoke-test platform: {platform_name}")
+
+
 def main():
     _configure_logging()
+    if "--smoke-test" in sys.argv:
+        _runtime_smoke_test()
+        return
     cfg = load_config()
 
     os.makedirs(cfg["output_dir"], exist_ok=True)

@@ -14,8 +14,9 @@ timestamps, and hand that transcript to the Claude CLI for a summary.
 It also does push-to-talk dictation. Hold Ctrl+Space anywhere, speak, let go, and the text
 appears where your caret is.
 
-Written for Google Meet and Teams calls in Czech and English, on Windows. It runs on macOS
-and Linux too, with the caveats in the support table below.
+Written for Google Meet and Teams calls in Czech and English. It captures system audio
+natively on Windows and modern macOS; Linux and older macOS releases have the routing
+caveats in the support table below.
 
 ![The main window with a few recordings](docs/screenshot.png)
 
@@ -69,26 +70,30 @@ please report what you find.
 | | Windows | macOS | Linux |
 | --- | --- | --- | --- |
 | Microphone recording | yes | yes, asks for permission | yes |
-| System audio | yes, straight from the default output | needs a virtual device, see below | needs a `.monitor` source, see below |
+| System audio | yes, straight from the default output | native on macOS 13+; BlackHole fallback | needs a `.monitor` source, see below |
 | Transcription and summaries | yes | yes | yes |
-| Live subtitles (RTS Translate) | yes | only with a system source | only with a monitor source |
+| Live subtitles (RTS Translate) | yes | yes on macOS 13+ | only with a monitor source |
 | Dictation hotkey | yes | yes, needs Accessibility permission | X11 only, not on Wayland |
 | Paste after dictation | yes | yes, sends Cmd+V | X11, and needs `xclip` or `xsel` |
 | Tested by the maintainer | yes | no | no |
 
-**System audio outside Windows.** Windows can record its own output directly through WASAPI
-loopback, and needs no setup. macOS and Linux have no such thing, so the second track is an
-ordinary input device that you route your sound into, and you pick it in Settings:
+**System audio.** Windows records its default output through WASAPI loopback. On macOS 13 or
+newer, leaving the system source on **Default** uses ScreenCaptureKit and needs no virtual
+audio device. The first recording asks for Screen & System Audio Recording permission; grant
+it in System Settings > Privacy & Security and restart Meeting Recorder when macOS requests
+that.
+
+The explicit routed-input choices remain available:
 
 - **Linux** - PulseAudio and pipewire-pulse create a `.monitor` source for every output. Pick
   the monitor of the output you are listening on. If it does not appear in the list, route the
   application to it with `pavucontrol` instead.
-- **macOS** - install a virtual audio device such as
+- **macOS 12 or an explicit compatibility setup** - install a virtual audio device such as
   [BlackHole](https://github.com/ExistentialAudio/BlackHole), create a multi-output device in
   Audio MIDI Setup that feeds both your speakers and BlackHole, then pick BlackHole here.
 
-Without one of those, the recording is your microphone only. The application says so in the
-status bar rather than pretending it captured the call.
+On Linux and macOS 12, without a routed system source the recording is microphone-only. The
+application says so in the status bar rather than pretending it captured the call.
 
 **Wayland.** No application can watch the keyboard globally on Wayland, so dictation is turned
 off there and the button says why. Recording and transcription are unaffected.
@@ -98,12 +103,13 @@ off there and the button says why. Recording and transcription are unaffected.
 Download the build for your platform from
 [Releases](https://github.com/ludekvodicka/MeetingRecorder/releases).
 
-**The builds are unsigned.** Check the SHA256 of your download against `SHA256SUMS.txt` in the
-same release before running it:
+Unless a release explicitly says it is notarized, its builds are unsigned. Check the SHA256
+of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Audio-Recorder-0.1.0-x64.exe                      # Linux, macOS, Git Bash
-certutil -hashfile Audio-Recorder-0.1.0-x64.exe SHA256      # Windows
+sha256sum Meeting-Recorder-0.2.0-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.2.0-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.2.0-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
@@ -125,11 +131,16 @@ operating system keyring, not in a configuration file. For development or on a m
 keyring you can set `SONIOX_API_KEY` in the environment instead, which takes precedence.
 
 **Claude CLI, optional.** Only needed for the Cleanup button. Install
-[Claude Code](https://claude.com/claude-code) and make sure `claude` is on your PATH.
+[Claude Code](https://claude.com/claude-code). Shell launches use your PATH; on macOS, Finder
+launches also look in the Homebrew and standard Claude/per-user installation locations.
 
 **Audio devices.** Settings lists what your system offers. Leaving both on Default is right for
-most Windows machines. Devices are remembered by name, so unplugging and replugging a headset
-does not silently switch you to a different microphone.
+most Windows machines and for macOS 13 or newer. Devices are remembered by name, so unplugging
+and replugging a headset does not silently switch you to a different microphone.
+
+**macOS permissions.** The first recording asks for Microphone and Screen & System Audio
+Recording access. After granting screen/audio capture, restart the app. Dictation separately
+needs Accessibility access so the global hotkey and Cmd+V can reach other applications.
 
 ## Your data stays on your machine
 
@@ -171,11 +182,26 @@ pytest
 python scripts/build.py package   # writes installers into release/
 ```
 
+On macOS, PyInstaller ad-hoc signs local builds and `package` smoke-tests the frozen runtime
+before creating the DMG. For a distributable Developer ID build, first store a `notarytool`
+profile in Keychain, then run:
+
+```sh
+MACOS_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+MACOS_NOTARY_PROFILE="meeting-recorder-notary" \
+python scripts/build.py package
+```
+
+The command signs with hardened runtime, submits the DMG to Apple, staples the ticket, and
+verifies both the ticket and Gatekeeper assessment. Credentials stay in Keychain; the profile
+name is the only notarization value passed to the build.
+
 Linux also needs the Qt and PortAudio system libraries; the list CI installs is in
 `.github/workflows/ci.yml`. The AppImage step needs `appimagetool` on PATH.
 
-The tests cover the parts that need no hardware: the transcript format, the mixing maths, the
-settings, the recording scanner and the push-to-talk logic. Everything else needs a real
+The tests cover the parts that need no hardware: the transcript format, mixing maths, device
+selection, native PCM conversion, settings, recording scanner and push-to-talk logic. macOS
+CI also builds and starts the frozen runtime in smoke-test mode. Real capture still needs a
 machine, and `docs/manual-test-checklist.md` lists what to try before a release.
 
 ## Contributing

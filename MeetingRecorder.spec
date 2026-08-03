@@ -10,8 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
-
 sys.path.insert(0, SPECPATH)
 from audiorecorder.version import __version__
 
@@ -25,12 +23,8 @@ binaries = []
 # anywhere else.
 hiddenimports = ["pyaudiowpatch"] if sys.platform == "win32" else []
 
-# Collected wholesale because Qt loads its image, SVG and multimedia plugins by path at
-# runtime, which static analysis does not see.
-qt_datas, qt_binaries, qt_hiddenimports = collect_all("PyQt6")
-datas += qt_datas
-binaries += qt_binaries
-hiddenimports += qt_hiddenimports
+# PyInstaller's hooks for the five imported Qt modules collect their required plugins and
+# frameworks. Collecting all of PyQt6 also pulled in unused QML, 3D, SQL and design tools.
 
 a = Analysis(
     [str(Path(SPECPATH) / "audiorecorder" / "__main__.py")],

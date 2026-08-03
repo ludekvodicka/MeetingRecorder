@@ -75,11 +75,19 @@ and say in the release notes what was not exercised.
 
 ### macOS
 
-- [ ] The unsigned `.dmg` opens after `xattr -cr` on the app, and the app starts
-- [ ] macOS asks for microphone permission on the first recording
-- [ ] Recording with no system source configured records the microphone only, and says so
+- [ ] The `.dmg` opens and the app starts; for an unsigned local build, confirm the documented
+      `xattr -cr` fallback still works
+- [ ] On macOS 13+, leave the system source on Default and start a recording: macOS asks for
+      Screen & System Audio Recording and microphone permission
+- [ ] Grant screen/audio capture, restart the app, and confirm the system meter moves while
+      audio plays without BlackHole installed
+- [ ] Stop: the resulting `.m4a` contains both system audio and the microphone
+- [ ] Set the system source to "None (microphone only)": the status bar says so and the result
+      contains no system audio
 - [ ] With BlackHole installed and a multi-output device set up, selecting BlackHole as the
-      system source captures the system sound
+      explicit system source still captures system sound
+- [ ] Record, stop, then record again in the same app process; native capture starts both times
+- [ ] Switch RTS Translate on and confirm native system audio feeds live subtitles
 - [ ] Dictation asks for Accessibility permission, and works once it is granted
 - [ ] Paste sends Cmd+V, not Ctrl+V
 - [ ] Note whether Ctrl+Space collides with the input source switcher on this machine

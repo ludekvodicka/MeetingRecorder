@@ -63,3 +63,27 @@ def test_macos_entitlements_include_audio_input():
     contents = (build.ROOT / "packaging" / "macos.entitlements").read_text(encoding="utf-8")
 
     assert "com.apple.security.device.audio-input" in contents
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "relative_executable"),
+    [
+        ("win32", "MeetingRecorder.exe"),
+        ("darwin", "Meeting Recorder.app/Contents/MacOS/MeetingRecorder"),
+        ("linux", "MeetingRecorder/MeetingRecorder"),
+    ],
+)
+def test_smoke_test_runs_each_platforms_bundled_executable(
+    tmp_path, monkeypatch, platform_name, relative_executable
+):
+    executable = tmp_path / relative_executable
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.touch()
+    commands = []
+    monkeypatch.setattr(build, "DIST", tmp_path)
+    monkeypatch.setattr(build.sys, "platform", platform_name)
+    monkeypatch.setattr(build, "run", lambda command, **kwargs: commands.append(command))
+
+    build.smoke()
+
+    assert commands == [[str(executable), "--smoke-test"]]

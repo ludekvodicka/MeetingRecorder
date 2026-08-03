@@ -160,6 +160,16 @@ class PortAudioBackend(CaptureBackend):
             except Exception:
                 log.exception("could not close a partially opened audio file")
             setattr(self, attr, None)
+        for attr in ("_system_path", "_mic_path"):
+            path = getattr(self, attr)
+            try:
+                if path is not None:
+                    os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                log.exception("could not remove a partial audio file")
+            setattr(self, attr, None)
 
     def _system_callback(self, indata, frames, time_info, status):
         data = np.asarray(indata, dtype=np.float32)

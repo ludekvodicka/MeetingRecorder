@@ -190,6 +190,23 @@ def test_partial_start_cleanup_does_not_mask_original_error(monkeypatch, tmp_pat
         backend.start(str(tmp_path), None, None)
 
 
+def test_partial_start_cleanup_removes_temporary_audio_files(tmp_path):
+    system_path = tmp_path / "_rec_system.wav"
+    mic_path = tmp_path / "_rec_mic.wav"
+    system_path.touch()
+    mic_path.touch()
+    backend = MacOSBackend()
+    backend._system_path = str(system_path)
+    backend._mic_path = str(mic_path)
+
+    backend._discard_partial_start()
+
+    assert not system_path.exists()
+    assert not mic_path.exists()
+    assert backend._system_path is None
+    assert backend._mic_path is None
+
+
 def test_stop_finalizes_paths_even_when_native_stream_cleanup_fails():
     class BrokenStream:
         def stop(self):

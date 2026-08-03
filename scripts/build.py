@@ -2,6 +2,7 @@
 
     python scripts/build.py icons     regenerate the icon files from icon.svg
     python scripts/build.py build     run PyInstaller
+    python scripts/build.py smoke     verify the already-built executable can start its runtime
     python scripts/build.py package   build, then wrap the result for distribution
 
 PyInstaller only produces a program directory or a single executable. Turning that into
@@ -86,6 +87,20 @@ def build():
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", str(SPEC)])
 
 
+def smoke():
+    if sys.platform == "win32":
+        executable = DIST / "MeetingRecorder.exe"
+    elif sys.platform == "darwin":
+        executable = DIST / f"{PRODUCT}.app" / "Contents" / "MacOS" / "MeetingRecorder"
+    elif sys.platform == "linux":
+        executable = DIST / "MeetingRecorder" / "MeetingRecorder"
+    else:
+        raise SystemExit(f"Unsupported platform: {sys.platform}")
+    if not executable.exists():
+        raise SystemExit(f"{executable} is missing, run the build first")
+    run([str(executable), "--smoke-test"])
+
+
 def package_windows():
     executable = DIST / "MeetingRecorder.exe"
     if not executable.exists():
@@ -113,7 +128,7 @@ def package_macos():
         )
     target = RELEASE / f"{ARTIFACT_STEM}-{__version__}-{arch_tag()}.dmg"
     target.unlink(missing_ok=True)
-    run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)])
+    run(["codesign", "--verify", "--deep", "--strict", str(app)])
     run(["hdiutil", "create", "-volname", PRODUCT, "-srcfolder", str(app),
          "-ov", "-format", "UDZO", str(target)])
     if notary_profile:
@@ -165,6 +180,7 @@ def package_linux():
 
 def package():
     build()
+    smoke()
     RELEASE.mkdir(exist_ok=True)
     if sys.platform == "win32":
         artifacts = package_windows()
@@ -182,12 +198,14 @@ def package():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["icons", "build", "package"])
+    parser.add_argument("command", choices=["icons", "build", "smoke", "package"])
     command = parser.parse_args().command
     if command == "icons":
         make_icons()
     elif command == "build":
         build()
+    elif command == "smoke":
+        smoke()
     elif command == "package":
         package()
     else:
