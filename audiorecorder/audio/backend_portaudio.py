@@ -11,6 +11,7 @@ When no system source is configured, only the microphone is recorded and ``stop`
 None for the system track.
 """
 
+import logging
 import os
 import threading
 import time
@@ -33,6 +34,7 @@ from audiorecorder.audio.device_selection import (
 )
 
 BLOCK_SIZE = 1024
+log = logging.getLogger(__name__)
 
 
 class PortAudioBackend(CaptureBackend):
@@ -76,6 +78,41 @@ class PortAudioBackend(CaptureBackend):
         except DeviceResolutionError as err:
             raise CaptureError(f"No microphone available: {err}") from err
 
+    def _open_routed_system(self, tmp_dir, system_device, stamp):
+        index, info = system_device
+        channels = min(2, int(info["max_input_channels"]))
+        rate = int(info["default_samplerate"])
+        self._active_system_source = info["name"]
+        self._system_path = os.path.join(tmp_dir, f"_rec_system_{stamp}.wav")
+        self._system_writer = sf.SoundFile(
+            self._system_path, mode="w", samplerate=rate,
+            channels=channels, format="WAV", subtype="FLOAT",
+        )
+        self._system_stream = sd.InputStream(
+            device=index, channels=channels, samplerate=rate, dtype="float32",
+            blocksize=BLOCK_SIZE, callback=self._system_callback,
+        )
+        self._prepare_tap(rate)
+
+    def _open_microphone(self, tmp_dir, mic_source, stamp):
+        mic_index, mic_info = self._resolve_microphone(mic_source)
+        mic_rate = int(mic_info["default_samplerate"])
+        self._active_mic_source = mic_info["name"]
+        self._mic_path = os.path.join(tmp_dir, f"_rec_mic_{stamp}.wav")
+        self._mic_writer = sf.SoundFile(
+            self._mic_path, mode="w", samplerate=mic_rate,
+            channels=1, format="WAV", subtype="FLOAT",
+        )
+        self._mic_stream = sd.InputStream(
+            device=mic_index, channels=1, samplerate=mic_rate, dtype="float32",
+            blocksize=BLOCK_SIZE, callback=self._mic_callback,
+        )
+
+    def _start_open_streams(self):
+        if self._system_stream is not None:
+            self._system_stream.start()
+        self._mic_stream.start()
+
     def start(self, tmp_dir, system_source, mic_source):
         if self._is_recording:
             return
@@ -90,40 +127,13 @@ class PortAudioBackend(CaptureBackend):
                 system_device = self._resolve_system_source(system_source)
             record_system = system_device is not None
             if record_system:
-                index, info = system_device
-                channels = min(2, int(info["max_input_channels"]))
-                rate = int(info["default_samplerate"])
-                self._active_system_source = info["name"]
-                self._system_path = os.path.join(tmp_dir, f"_rec_system_{stamp}.wav")
-                self._system_writer = sf.SoundFile(
-                    self._system_path, mode="w", samplerate=rate,
-                    channels=channels, format="WAV", subtype="FLOAT",
-                )
-                self._system_stream = sd.InputStream(
-                    device=index, channels=channels, samplerate=rate, dtype="float32",
-                    blocksize=BLOCK_SIZE, callback=self._system_callback,
-                )
-                self._prepare_tap(rate)
+                self._open_routed_system(tmp_dir, system_device, stamp)
             else:
                 self._active_system_source = None
                 self._system_path = None
 
-            mic_index, mic_info = self._resolve_microphone(mic_source)
-            mic_rate = int(mic_info["default_samplerate"])
-            self._active_mic_source = mic_info["name"]
-            self._mic_path = os.path.join(tmp_dir, f"_rec_mic_{stamp}.wav")
-            self._mic_writer = sf.SoundFile(
-                self._mic_path, mode="w", samplerate=mic_rate,
-                channels=1, format="WAV", subtype="FLOAT",
-            )
-            self._mic_stream = sd.InputStream(
-                device=mic_index, channels=1, samplerate=mic_rate, dtype="float32",
-                blocksize=BLOCK_SIZE, callback=self._mic_callback,
-            )
-
-            if self._system_stream is not None:
-                self._system_stream.start()
-            self._mic_stream.start()
+            self._open_microphone(tmp_dir, mic_source, stamp)
+            self._start_open_streams()
         except CaptureError:
             self._discard_partial_start()
             raise
@@ -137,12 +147,18 @@ class PortAudioBackend(CaptureBackend):
         for attr in ("_system_stream", "_mic_stream"):
             stream = getattr(self, attr)
             if stream is not None:
-                stream.close()
+                try:
+                    stream.close()
+                except Exception:
+                    log.exception("could not close a partially opened audio stream")
                 setattr(self, attr, None)
         for attr in ("_system_writer", "_mic_writer"):
             writer = getattr(self, attr)
-            if writer is not None and not writer.closed:
-                writer.close()
+            try:
+                if writer is not None and not writer.closed:
+                    writer.close()
+            except Exception:
+                log.exception("could not close a partially opened audio file")
             setattr(self, attr, None)
 
     def _system_callback(self, indata, frames, time_info, status):
@@ -172,15 +188,24 @@ class PortAudioBackend(CaptureBackend):
         for attr in ("_system_stream", "_mic_stream"):
             stream = getattr(self, attr)
             if stream is not None:
-                stream.stop()
-                stream.close()
+                try:
+                    stream.stop()
+                except Exception:
+                    log.exception("could not stop an audio stream cleanly")
+                try:
+                    stream.close()
+                except Exception:
+                    log.exception("could not close an audio stream cleanly")
                 setattr(self, attr, None)
 
         with self._lock:
             for attr in ("_system_writer", "_mic_writer"):
                 writer = getattr(self, attr)
-                if writer is not None and not writer.closed:
-                    writer.close()
+                try:
+                    if writer is not None and not writer.closed:
+                        writer.close()
+                except Exception:
+                    log.exception("could not finalize an audio file cleanly")
 
         return self._system_path, self._mic_path
 

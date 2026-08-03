@@ -5,10 +5,10 @@ output is obtained differs per platform, and that is the only thing the two back
 disagree about:
 
 * Windows records it directly through the WASAPI loopback of the default output device.
-* macOS and Linux have no loopback of their own, so the system track is an ordinary input
-  device that the user routes their output into: a PulseAudio or PipeWire ``.monitor``
-  source on Linux, a virtual device such as BlackHole on macOS. Without one, recording is
-  microphone only, and the application says so rather than pretending.
+* macOS records it directly through ScreenCaptureKit. A virtual input such as BlackHole
+  remains available as an explicitly selected compatibility path.
+* Linux records an ordinary PulseAudio or PipeWire ``.monitor`` input. Without one,
+  recording is microphone only, and the application says so rather than pretending.
 
 The user interface talks to this interface only and never branches on the platform.
 """
@@ -28,7 +28,8 @@ log = logging.getLogger(__name__)
 SUBTITLE_RATE = 16000
 
 # An explicit "record the microphone only". Distinct from None, which means "whatever this
-# platform offers by default": the default output loopback on Windows, nothing anywhere else.
+# platform offers by default": the default output loopback on Windows, native capture on
+# macOS, and nothing on Linux.
 SYSTEM_SOURCE_NONE = ""
 
 

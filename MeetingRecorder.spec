@@ -90,6 +90,10 @@ elif sys.platform == "darwin":
             # Without this key macOS denies the microphone without even showing a prompt.
             "NSMicrophoneUsageDescription":
                 "Meeting Recorder records your microphone for meetings and dictation.",
+            "NSScreenCaptureUsageDescription":
+                "Meeting Recorder captures system audio so calls can be recorded.",
+            "NSAudioCaptureUsageDescription":
+                "Meeting Recorder captures system audio so calls can be recorded.",
             "NSHighResolutionCapable": True,
         },
     )
