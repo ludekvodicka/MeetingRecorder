@@ -27,6 +27,11 @@ from audiorecorder.audio.backend import (
     CaptureError,
     rms_level,
 )
+from audiorecorder.audio.device_selection import (
+    DeviceResolutionError,
+    find_input_device,
+    resolve_microphone,
+)
 
 BLOCK_SIZE = 1024
 
@@ -62,24 +67,15 @@ class PortAudioBackend(CaptureBackend):
     def list_microphones(self):
         return self._input_devices()
 
-    def _index_by_name(self, name):
-        for index, info in enumerate(sd.query_devices()):
-            if info["max_input_channels"] > 0 and info["name"] == name:
-                return index
-        return None
+    def _resolve_system_source(self, name):
+        """A routed source is optional and must never fall back to a microphone."""
+        return find_input_device(sd, name)
 
-    def _resolve(self, name, what):
-        if name:
-            index = self._index_by_name(name)
-            if index is not None:
-                return index, sd.query_devices(index)
+    def _resolve_microphone(self, name):
         try:
-            index = sd.default.device[0]
-            if index is None or index < 0:
-                raise CaptureError(f"No default {what} available.")
-            return index, sd.query_devices(index)
-        except (sd.PortAudioError, ValueError, TypeError) as err:
-            raise CaptureError(f"No {what} available: {err}") from err
+            return resolve_microphone(sd, name)
+        except DeviceResolutionError as err:
+            raise CaptureError(f"No microphone available: {err}") from err
 
     def start(self, tmp_dir, system_source, mic_source):
         if self._is_recording:
@@ -87,12 +83,15 @@ class PortAudioBackend(CaptureBackend):
 
         # None means "the platform default", and this platform has no default system
         # source, so both None and the explicit choice mean microphone only.
-        record_system = bool(system_source) and system_source != SYSTEM_SOURCE_NONE
         stamp = int(time.time())
 
         try:
+            system_device = None
+            if system_source and system_source != SYSTEM_SOURCE_NONE:
+                system_device = self._resolve_system_source(system_source)
+            record_system = system_device is not None
             if record_system:
-                index, info = self._resolve(system_source, "system audio source")
+                index, info = system_device
                 channels = min(2, int(info["max_input_channels"]))
                 rate = int(info["default_samplerate"])
                 self._active_system_source = info["name"]
@@ -110,7 +109,7 @@ class PortAudioBackend(CaptureBackend):
                 self._active_system_source = None
                 self._system_path = None
 
-            mic_index, mic_info = self._resolve(mic_source, "microphone")
+            mic_index, mic_info = self._resolve_microphone(mic_source)
             mic_rate = int(mic_info["default_samplerate"])
             self._active_mic_source = mic_info["name"]
             self._mic_path = os.path.join(tmp_dir, f"_rec_mic_{stamp}.wav")

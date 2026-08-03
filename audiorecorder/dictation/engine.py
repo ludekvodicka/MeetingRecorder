@@ -1,11 +1,14 @@
 import logging
 import queue
 import threading
+from contextlib import suppress
 
 import numpy as np
 import sounddevice as sd
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from audiorecorder.audio.device_selection import DeviceResolutionError, resolve_microphone
+from audiorecorder.audio.resample import Downsampler
 from audiorecorder.dictation.hotkeys import (
     HotkeyListener,
     PushToTalkStateMachine,
@@ -15,13 +18,6 @@ from audiorecorder.dictation.output import paste_text
 from audiorecorder.dictation.streaming import SonioxStreamingSession
 
 log = logging.getLogger(__name__)
-
-
-def _same_device(candidate, configured):
-    """Same physical device, allowing for a name one API truncated and the other did not."""
-    return (candidate == configured
-            or candidate.startswith(configured)
-            or configured.startswith(candidate))
 
 
 class DictationEngine(QObject):
@@ -46,6 +42,7 @@ class DictationEngine(QObject):
         self._active_label = None
         self._recording_started = threading.Event()
         self._recording_done = threading.Event()
+        self._downsampler = Downsampler(sample_rate, sample_rate)
         self._machine = PushToTalkStateMachine(
             on_activate=self._begin_capture, on_release=self._end_capture,
             modifier_probe=held_modifiers,
@@ -64,20 +61,16 @@ class DictationEngine(QObject):
         return [self.language]
 
     def _find_input_device(self):
-        """Index of the configured microphone, else the first available input.
+        """The configured microphone, else the operating-system default input.
 
         Settings store the device name, so it can be matched directly. WASAPI and
         PortAudio sometimes truncate the same device name differently, which is why a
         prefix on either side counts as a match.
         """
-        if self.mic_source_name:
-            for i, d in enumerate(sd.query_devices()):
-                if d["max_input_channels"] > 0 and _same_device(d["name"], self.mic_source_name):
-                    return i
-        for i, d in enumerate(sd.query_devices()):
-            if d["max_input_channels"] > 0:
-                return i
-        raise RuntimeError("No input device found")
+        try:
+            return resolve_microphone(sd, self.mic_source_name, allow_prefix=True)
+        except DeviceResolutionError as err:
+            raise RuntimeError(f"No input device found: {err}") from err
 
     def start(self):
         if self._running:
@@ -86,18 +79,28 @@ class DictationEngine(QObject):
         # Raises HotkeyUnsupportedError before anything is opened, so a platform without
         # global hotkeys fails on the button click and not silently later.
         self._listener.start()
-        self._running = True
+        try:
+            sd_device, info = self._find_input_device()
+            capture_rate = int(info["default_samplerate"])
+            self._downsampler = Downsampler(capture_rate, self.sample_rate)
+            self._stream = sd.InputStream(
+                samplerate=capture_rate,
+                channels=1,
+                dtype="float32",
+                callback=self._audio_callback,
+                blocksize=1024,
+                device=sd_device,
+            )
+            self._stream.start()
+        except Exception:
+            self._listener.stop()
+            if self._stream is not None:
+                with suppress(Exception):
+                    self._stream.close()
+                self._stream = None
+            raise
 
-        sd_device = self._find_input_device()
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=1,
-            dtype="float32",
-            callback=self._audio_callback,
-            blocksize=1024,
-            device=sd_device,
-        )
-        self._stream.start()
+        self._running = True
 
         self._worker = threading.Thread(target=self._dictation_loop, daemon=True)
         self._worker.start()
@@ -129,6 +132,7 @@ class DictationEngine(QObject):
         """The hotkey went down. Called from the listener thread."""
         log.debug("hotkey down, capture begins (%s)", label)
         self._active_label = label
+        self._downsampler.reset()
         self._recording_done.clear()
         self._audio_queue = queue.Queue()
         self._is_recording = True
@@ -174,15 +178,15 @@ class DictationEngine(QObject):
             while not self._recording_done.is_set() or not self._audio_queue.empty():
                 try:
                     chunk = self._audio_queue.get(timeout=0.05)
-                    int16 = (chunk.flatten() * 32767).astype(np.int16)
-                    pcm_bytes = int16.tobytes()
+                    pcm_bytes = self._downsampler.feed(chunk)
 
                     arr = chunk.flatten()
                     rms = float(np.sqrt(np.mean(arr ** 2)))
                     level = min(1.0, (rms ** 0.5) * 2.2)
                     self.level_changed.emit(level)
 
-                    session.send_audio(pcm_bytes)
+                    if pcm_bytes:
+                        session.send_audio(pcm_bytes)
                 except queue.Empty:
                     continue
 

@@ -726,6 +726,11 @@ class MainWindow(QMainWindow):
             self._btn_dictation.setEnabled(False)
             self._btn_dictation.setToolTip(str(e))
             return
+        except Exception as e:
+            self._dictation = None
+            QMessageBox.warning(self, "Dictation Unavailable", str(e))
+            self._btn_dictation.setChecked(False)
+            return
 
         self._dictation_active = True
         self._btn_dictation.setChecked(True)
@@ -829,6 +834,13 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self._stop_recording()
+        if self._active_encoders or self._busy_paths:
+            self._status_bar.showMessage(
+                "Finishing background work before exit. Close again when it is done.", 8000)
+            event.ignore()
+            return
+        if self._dictation_active:
+            self._stop_dictation()
         # The filter is installed on the whole application, so it goes on being called
         # after this window is gone. Qt then calls it on a half-destroyed object and
         # aborts the process.
