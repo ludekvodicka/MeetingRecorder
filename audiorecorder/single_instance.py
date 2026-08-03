@@ -24,14 +24,17 @@ class SingleInstance(QObject):
 
     another_instance_started = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, name=SERVER_NAME):
+        # The name is a parameter so the tests can claim a lock of their own. Sharing the
+        # real one would make the suite fail whenever the application happens to be running.
         super().__init__()
+        self._name = name
         self._server = None
 
     def take_ownership(self):
         """True when this copy is the one that should run."""
         socket = QLocalSocket()
-        socket.connectToServer(SERVER_NAME)
+        socket.connectToServer(self._name)
         if socket.waitForConnected(CONNECT_TIMEOUT_MS):
             # Somebody is already listening, so ask them to come forward and step aside.
             socket.write(b"raise")
@@ -42,10 +45,10 @@ class SingleInstance(QObject):
 
         # A copy that crashed leaves the name behind on Unix sockets and nothing can bind
         # to it again until it is removed.
-        QLocalServer.removeServer(SERVER_NAME)
+        QLocalServer.removeServer(self._name)
 
         self._server = QLocalServer(self)
-        if not self._server.listen(SERVER_NAME):
+        if not self._server.listen(self._name):
             # Losing the race is not a reason to refuse to start: better two windows than
             # none. The hook duplication is the thing worth avoiding, and it is unlikely
             # enough here to accept.

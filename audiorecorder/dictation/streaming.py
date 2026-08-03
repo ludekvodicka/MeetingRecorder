@@ -14,6 +14,22 @@ _session_numbers = itertools.count(1)
 NORMAL_CLOSURE = 1000
 
 
+def _bucket_of(token):
+    """Which of the three states a token is in.
+
+    A session that is not translating tags nothing at all, and everything it says is
+    simply what was spoken.
+    """
+    status = token.get("translation_status")
+    if status == "original":
+        return "original"
+    if status == "translation":
+        return "translation"
+    if status in (None, "none"):
+        return "untranslated"
+    raise ValueError(f"Unknown translation status: {status}")
+
+
 def is_normal_close(error):
     """True when what came through the error channel is the stream ending as it should.
 
@@ -34,16 +50,20 @@ class SonioxStreamingSession:
     """Manages a single WebSocket session for one dictation recording."""
 
     def __init__(self, api_key, language_hints=None, sample_rate=16000, translate_to=None,
-                 on_preview=None):
+                 on_preview=None, on_pair=None):
         self.api_key = api_key
         self.language_hints = language_hints or []
         self.sample_rate = sample_rate
         self.translate_to = translate_to
         self.on_preview = on_preview
+        # Subtitles want both languages as they arrive; dictation only wants the result.
+        self.on_pair = on_pair
         self.ws = None
 
         self._final_tokens = []
-        self._current_provisional = ""
+        self._provisional_original = ""
+        self._provisional_translation = ""
+        self._provisional_untranslated = ""
         self._finished = threading.Event()
         self._opened = threading.Event()
         self._error = None
@@ -91,27 +111,46 @@ class SonioxStreamingSession:
             return
 
         tokens = data.get("tokens", [])
-        if tokens and self.first_token_time is None:
+        # start_time is only set by connect(), and a message can arrive without one when
+        # the session is driven directly. Losing a latency figure is not worth an exception
+        # inside the socket thread.
+        if tokens and self.first_token_time is None and self.start_time is not None:
             self.first_token_time = time.perf_counter() - self.start_time
 
-        provisional_parts = []
+        # Every token is kept, whichever language it is in. A translating session returns
+        # both, and subtitles show both; the accessors below decide what each caller sees.
+        # Three states, not two. Speech already in the target language comes back tagged
+        # "none": it is neither a source waiting for a translation nor a translation of
+        # anything. Treating it as a translation paired a Czech sentence with the English
+        # one that followed it.
+        buckets = {"original": [], "translation": [], "untranslated": []}
+        settled_anything = False
         for tok in tokens:
-            text = tok.get("text", "")
-            is_final = tok.get("is_final", False)
-            if self.translate_to and tok.get("translation_status") == "original":
-                continue
-            if is_final:
+            if tok.get("is_final", False):
                 self._final_tokens.append(tok)
+                settled_anything = True
             else:
-                provisional_parts.append(text)
+                buckets[_bucket_of(tok)].append(tok.get("text", ""))
 
-        new_provisional = "".join(provisional_parts)
-        if new_provisional != self._current_provisional:
-            self._current_provisional = new_provisional
+        new_original = "".join(buckets["original"])
+        new_translation = "".join(buckets["translation"])
+        new_untranslated = "".join(buckets["untranslated"])
+        provisional_changed = (
+            (new_original, new_translation, new_untranslated)
+            != (self._provisional_original, self._provisional_translation,
+                self._provisional_untranslated))
+        self._provisional_original = new_original
+        self._provisional_translation = new_translation
+        self._provisional_untranslated = new_untranslated
+
+        # Text settling counts as a change too. The last sentence of a stream arrives
+        # already final, with no provisional left to differ, and watching only the
+        # provisional meant that sentence never reached the listener.
+        if settled_anything or provisional_changed:
             if self.on_preview:
-                final_text = "".join(t.get("text", "") for t in self._final_tokens)
-                preview = (final_text + new_provisional).strip()
-                self.on_preview(preview)
+                self.on_preview(self.get_final_text())
+            if self.on_pair:
+                self.on_pair(self.get_original_text(), self.get_translated_text())
 
         if data.get("finished"):
             self._finished.set()
@@ -174,12 +213,57 @@ class SonioxStreamingSession:
             raise RuntimeError(f"Soniox error: {self._error}")
 
     def get_final_text(self):
+        """What the caller asked the session for: the target language when translating.
+
+        Speech already in that language belongs here too. It arrives untagged and is not a
+        translation of anything, but it is what the caller wanted to read.
+        """
         if self.translate_to:
-            text = "".join(
-                t.get("text", "") for t in self._final_tokens
-                if t.get("translation_status") != "original"
-            )
+            return self._assemble(
+                ("translation", "untranslated"),
+                self._provisional_translation + self._provisional_untranslated)
+        return self._assemble(None, self._provisional_original
+                              + self._provisional_translation
+                              + self._provisional_untranslated)
+
+    def get_original_text(self):
+        """The source language, whether or not a translation was asked for."""
+        if not self.translate_to:
+            return self.get_final_text()
+        return self._assemble(("original",), self._provisional_original)
+
+    def get_translated_text(self):
+        """The target language. Empty when the session is not translating."""
+        if not self.translate_to:
+            return ""
+        return self._assemble(("translation",), self._provisional_translation)
+
+    def get_untranslated_text(self):
+        """Speech that was already in the target language, so has no counterpart."""
+        if not self.translate_to:
+            return ""
+        return self._assemble(("untranslated",), self._provisional_untranslated)
+
+    def finalized_original(self):
+        """Only the settled part, so a caller can tell new text from a revision."""
+        return self._assemble(("original",) if self.translate_to else None, "")
+
+    def finalized_translation(self):
+        return self._assemble(("translation",), "") if self.translate_to else ""
+
+    def finalized_untranslated(self):
+        return self._assemble(("untranslated",), "") if self.translate_to else ""
+
+    def is_finished(self):
+        return self._finished.is_set()
+
+    def _assemble(self, wanted, provisional):
+        """Join the settled tokens of the named buckets, then the provisional tail."""
+        if wanted is None:
+            finals = self._final_tokens
         else:
-            text = "".join(t.get("text", "") for t in self._final_tokens)
-        text += self._current_provisional
-        return text.strip()
+            for name in wanted:
+                if name not in ("original", "translation", "untranslated"):
+                    raise ValueError(f"Unknown token bucket: {name}")
+            finals = [t for t in self._final_tokens if _bucket_of(t) in wanted]
+        return ("".join(t.get("text", "") for t in finals) + provisional).strip()

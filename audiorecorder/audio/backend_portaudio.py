@@ -105,6 +105,7 @@ class PortAudioBackend(CaptureBackend):
                     device=index, channels=channels, samplerate=rate, dtype="float32",
                     blocksize=BLOCK_SIZE, callback=self._system_callback,
                 )
+                self._prepare_tap(rate)
             else:
                 self._active_system_source = None
                 self._system_path = None
@@ -153,6 +154,7 @@ class PortAudioBackend(CaptureBackend):
                 self._system_writer.write(data)
         if self._system_level_callback:
             self._system_level_callback(rms_level(data))
+        self._feed_tap(data)
 
     def _mic_callback(self, indata, frames, time_info, status):
         data = np.asarray(indata, dtype=np.float32)

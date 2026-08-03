@@ -34,6 +34,9 @@ DEFAULTS = {
     "system_volume": 1.0,
     "mic_volume": 1.0,
     "summary_prompt": DEFAULT_SUMMARY_PROMPT,
+    # Live translated subtitles during a recording. Off by default: it bills realtime
+    # minutes for the whole call, on top of the transcription that follows it.
+    "rts_translate": False,
 }
 
 

@@ -55,6 +55,20 @@ and say in the release notes what was not exercised.
       happen
 - [ ] The overlay pill appears at the bottom of the screen, animates while recording, and
       does not swallow mouse clicks
+- [ ] Switch RTS Translate on outside a recording: the status bar says it starts with the
+      next one, and the subtitle area appears
+- [ ] Record a call in English with the language set to Czech: the original appears under the
+      level meters with the Czech under it, within a couple of seconds of the words
+- [ ] Stop the recording: a `.live.md` sits beside the `.m4a` and matches what was on screen
+- [ ] Record with RTS Translate on and say nothing: no `.live.md` is written
+- [ ] Record with RTS Translate on and the language set to auto: subtitles appear untranslated
+      and the heading says so
+- [ ] With no system audio source configured, the subtitle area says it needs one instead of
+      sitting empty
+- [ ] Pull the network out mid-call: the status bar says it is reconnecting, then that it has
+      stopped, and the recording carries on to a complete `.m4a` either way
+- [ ] Transcribe and summarize a recording made with subtitles on: both behave as before
+- [ ] Delete a recording that has a transcript, a summary and subtitles: all four files go
 - [ ] Clear the API key from the keyring, restart, and confirm Transcribe explains what to do
       rather than failing obscurely
 - [ ] Enter the key in Settings, confirm it is accepted and survives a restart

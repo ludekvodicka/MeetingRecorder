@@ -25,17 +25,31 @@ from audiorecorder.audio.encoder import mix_and_encode
 from audiorecorder.config import DEFAULT_SUMMARY_PROMPT, save_config
 from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
-from audiorecorder.recordings.manager import RecordingManager
+from audiorecorder.recordings.manager import RecordingManager, sidecars
+from audiorecorder.subtitles.document import write_live_transcript
+from audiorecorder.subtitles.engine import SubtitleEngine
 from audiorecorder.transcription.cleanup import CleanupWorker
+from audiorecorder.transcription.markdown import language_name
 from audiorecorder.transcription.soniox import SonioxWorker
 from audiorecorder.ui.audio_player import AudioPlayerWidget
 from audiorecorder.ui.level_bars import DualLevelBars
 from audiorecorder.ui.overlay import OverlayWidget
 from audiorecorder.ui.recording_list import RecordingListWidget
 from audiorecorder.ui.settings_dialog import SettingsDialog
+from audiorecorder.ui.subtitles import SubtitleView
 from audiorecorder.version import __version__
 
 log = logging.getLogger(__name__)
+
+# Both header toggles look the same when they are on: green means this is costing you
+# a live Soniox session.
+ACTIVE_TOGGLE_STYLE = """
+    QPushButton {
+        background-color: #2e7d32; color: white; font-weight: bold;
+        border-radius: 4px; border: none; padding: 4px;
+    }
+    QPushButton:hover { background-color: #388e3c; }
+"""
 
 
 class DictationHotkeyFilter(QObject):
@@ -104,6 +118,7 @@ class MainWindow(QMainWindow):
         self._transcribe_thread = None
         self._dictation = None
         self._dictation_active = False
+        self._subtitle_engine = None
         self._overlay = OverlayWidget()
         self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active)
         QApplication.instance().installEventFilter(self._hotkey_filter)
@@ -153,6 +168,18 @@ class MainWindow(QMainWindow):
             self._btn_dictation.setEnabled(False)
             self._btn_dictation.setToolTip(reason)
         header.addWidget(self._btn_dictation)
+
+        self._btn_rts = QPushButton("RTS Translate")
+        self._btn_rts.setCheckable(True)
+        self._btn_rts.setFixedWidth(105)
+        self._btn_rts.setToolTip(
+            "Live translated subtitles of the system audio while recording. "
+            "Costs Soniox realtime minutes for the length of the call.")
+        self._btn_rts.setChecked(bool(self.config.get("rts_translate")))
+        self._btn_rts.setStyleSheet(
+            ACTIVE_TOGGLE_STYLE if self._btn_rts.isChecked() else "")
+        self._btn_rts.clicked.connect(self._toggle_subtitles)
+        header.addWidget(self._btn_rts)
 
         btn_add = QPushButton("Add")
         btn_add.clicked.connect(self._add_files)
@@ -223,6 +250,11 @@ class MainWindow(QMainWindow):
         controls.addWidget(self._level_bars)
 
         layout.addLayout(controls)
+
+        # --- Live subtitles, only while they are wanted ---
+        self._subtitles = SubtitleView()
+        self._subtitles.setVisible(self._btn_rts.isChecked())
+        layout.addWidget(self._subtitles, stretch=1)
 
         # --- Status bar ---
         self._status_bar = QStatusBar()
@@ -298,6 +330,9 @@ class MainWindow(QMainWindow):
         else:
             self._status_bar.showMessage("Recording...")
 
+        if self._btn_rts.isChecked():
+            self._start_subtitles(system_name)
+
     def _toggle_mute(self):
         if not self._capture:
             return
@@ -327,6 +362,7 @@ class MainWindow(QMainWindow):
             return
 
         system_path, mic_path = self._capture.stop()
+        self._capture.set_system_tap(None)
         self._capture.close()
         self._capture = None
 
@@ -348,6 +384,7 @@ class MainWindow(QMainWindow):
         if mic_path:
             output_name = self._manager.generate_filename()
             output_path = os.path.join(self.config["output_dir"], output_name)
+            self._stop_subtitles(output_path)
 
             self._status_bar.showMessage("Encoding to M4A...")
 
@@ -433,13 +470,8 @@ class MainWindow(QMainWindow):
             p = os.path.basename(path)
             shutil.move(path, os.path.join(dest_dir, p))
 
-            md = os.path.splitext(path)[0] + ".md"
-            if os.path.exists(md):
-                shutil.move(md, os.path.join(dest_dir, os.path.basename(md)))
-
-            summary = os.path.splitext(path)[0] + ".summary.md"
-            if os.path.exists(summary):
-                shutil.move(summary, os.path.join(dest_dir, os.path.basename(summary)))
+            for sidecar in sidecars(path):
+                shutil.move(str(sidecar), os.path.join(dest_dir, sidecar.name))
 
             self._status_bar.showMessage(f"Moved to {dest_dir}", 5000)
             self._refresh_list()
@@ -570,6 +602,88 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Cleanup failed")
         QMessageBox.warning(self, "Cleanup Error", f"Claude cleanup failed:\n{error}")
 
+    def _toggle_subtitles(self):
+        wanted = self._btn_rts.isChecked()
+        self.config["rts_translate"] = wanted
+        save_config(self.config)
+        self._subtitles.setVisible(wanted)
+        self._btn_rts.setStyleSheet(ACTIVE_TOGGLE_STYLE if wanted else "")
+        if wanted:
+            # The subtitles read the capture backend, which only exists while recording.
+            self._status_bar.showMessage("Subtitles start with the next recording", 5000)
+        elif self._subtitle_engine is not None:
+            # Switching off mid-recording has to close the session, not just hide it.
+            # Soniox bills for the audio streamed to it, and a hidden session that is
+            # still being fed is billed exactly like a visible one.
+            self._stop_feeding_subtitles()
+            self._status_bar.showMessage("Subtitles stopped", 5000)
+
+    def _stop_feeding_subtitles(self):
+        """Stop sending audio, but keep what was heard for the sidecar."""
+        if self._capture is not None:
+            self._capture.set_system_tap(None)
+        self._subtitle_engine.stop()
+
+    def _start_subtitles(self, system_source_name):
+        if system_source_name is None:
+            self._subtitles.set_status("Live subtitles need a system audio source")
+            return
+
+        api_key = secrets.get_api_key()
+        if not api_key:
+            self._subtitles.set_status("Live subtitles need a Soniox API key")
+            self._status_bar.showMessage(
+                "Subtitles are off: no Soniox API key is configured", 8000)
+            return
+
+        try:
+            # Both configured languages are offered as candidates for what is being
+            # spoken, and the translation goes into the one you asked to read. A call
+            # can turn out to be in either of them, and naming both is what stops the
+            # model reaching for a third.
+            self._subtitle_engine = SubtitleEngine(
+                api_key=api_key,
+                translate_to=self.config.get("translation_target"),
+                source_languages=[self.config.get("language"),
+                                  self.config.get("translation_target")])
+        except ValueError as e:
+            self._subtitles.set_status(str(e))
+            return
+
+        self._subtitles.clear()
+        target = self._subtitle_engine.target_language
+        self._subtitles.set_status(
+            f"Live subtitles, translated into {language_name(target)}" if target
+            else "Live subtitles, not translated")
+        self._subtitle_engine.line_finalized.connect(self._subtitles.append_line)
+        self._subtitle_engine.line_updated.connect(self._subtitles.set_pending)
+        self._subtitle_engine.notice.connect(
+            lambda message: self._status_bar.showMessage(message, 8000))
+        self._subtitle_engine.error_occurred.connect(self._on_subtitle_error)
+        self._subtitle_engine.start()
+        self._capture.set_system_tap(self._subtitle_engine.feed)
+
+    def _stop_subtitles(self, recording_path):
+        """Ends the session and keeps what it heard beside the recording."""
+        if self._subtitle_engine is None:
+            return
+        engine = self._subtitle_engine
+        self._subtitle_engine = None
+        engine.stop()
+        self._subtitles.set_pending("", "")
+        try:
+            written = write_live_transcript(
+                recording_path, engine.transcript(), engine.target_language)
+        except OSError:
+            log.exception("the live subtitle sidecar could not be written")
+            return
+        if written is not None:
+            self._status_bar.showMessage(f"Subtitles saved: {written.name}", 5000)
+
+    def _on_subtitle_error(self, message):
+        log.error("subtitles failed: %s", message)
+        self._status_bar.showMessage(f"Subtitles: {message}", 8000)
+
     def _toggle_dictation(self):
         if self._dictation_active:
             self._stop_dictation()
@@ -613,13 +727,7 @@ class MainWindow(QMainWindow):
 
         self._dictation_active = True
         self._btn_dictation.setChecked(True)
-        self._btn_dictation.setStyleSheet("""
-            QPushButton {
-                background-color: #2e7d32; color: white; font-weight: bold;
-                border-radius: 4px; border: none; padding: 4px;
-            }
-            QPushButton:hover { background-color: #388e3c; }
-        """)
+        self._btn_dictation.setStyleSheet(ACTIVE_TOGGLE_STYLE)
         self._level_bars.start()
         self._level_bars.set_device_names("", "Dictation mic")
         self._overlay.activate()

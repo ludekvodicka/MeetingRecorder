@@ -65,3 +65,11 @@ class TestDefaults:
     def test_devices_are_unset_by_default(self):
         assert config.DEFAULTS["system_source_name"] is None
         assert config.DEFAULTS["mic_source_name"] is None
+
+    def test_live_subtitles_are_off_by_default(self):
+        """They bill realtime minutes for a whole call, so nobody gets them by accident."""
+        assert config.DEFAULTS["rts_translate"] is False
+
+    def test_the_subtitle_toggle_survives_a_restart(self, isolated_config):
+        config.save_config({**config.DEFAULTS, "rts_translate": True})
+        assert config.load_config()["rts_translate"] is True

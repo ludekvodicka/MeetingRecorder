@@ -5,4 +5,4 @@ dynamic project version, and `scripts/check_release_version.py` compares it agai
 git tag during a release build. Nothing else may hardcode a version string.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"

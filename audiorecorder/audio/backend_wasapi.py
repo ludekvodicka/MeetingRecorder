@@ -117,6 +117,7 @@ class WasapiBackend(CaptureBackend):
                 self._system_path, mode="w", samplerate=rate,
                 channels=self._system_channels, format="WAV", subtype="FLOAT",
             )
+            self._prepare_tap(rate)
         else:
             self._active_system_source = None
             self._system_path = None
@@ -194,6 +195,7 @@ class WasapiBackend(CaptureBackend):
                 self._system_writer.write(data)
         if self._system_level_callback:
             self._system_level_callback(rms_level(data))
+        self._feed_tap(data)
         return (None, pyaudio.paContinue)
 
     def _mic_callback(self, in_data, frame_count, time_info, status):

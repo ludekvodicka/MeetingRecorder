@@ -13,11 +13,19 @@ disagree about:
 The user interface talks to this interface only and never branches on the platform.
 """
 
+import logging
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
+
+from audiorecorder.audio.resample import Downsampler
+
+log = logging.getLogger(__name__)
+
+# What the Soniox realtime API wants, and therefore what the tap delivers.
+SUBTITLE_RATE = 16000
 
 # An explicit "record the microphone only". Distinct from None, which means "whatever this
 # platform offers by default": the default output loopback on Windows, nothing anywhere else.
@@ -50,6 +58,8 @@ class CaptureBackend(ABC):
         self._is_recording = False
         self._active_system_source = None
         self._active_mic_source = None
+        self._system_tap = None
+        self._downsampler = None
 
     @abstractmethod
     def list_system_sources(self):
@@ -79,6 +89,34 @@ class CaptureBackend(ABC):
     def set_level_callbacks(self, system_callback, mic_callback):
         self._system_level_callback = system_callback
         self._mic_level_callback = mic_callback
+
+    def set_system_tap(self, callback):
+        """Receive a copy of the system track as mono 16 kHz int16 bytes, None to stop.
+
+        Called from the audio thread, so the callback must return immediately. Anything that
+        waits there, a socket above all, is paid for in recorded audio.
+        """
+        self._system_tap = callback
+
+    def _prepare_tap(self, source_rate):
+        """Backends call this when the system stream opens, with its real sample rate."""
+        self._downsampler = Downsampler(source_rate, SUBTITLE_RATE)
+
+    def _feed_tap(self, block):
+        """Backends call this from the audio callback, after the recording is written.
+
+        Never raises: a subtitle fault is not worth a lost call, so the tap switches itself
+        off and the recording carries on without it.
+        """
+        if self._system_tap is None or self._downsampler is None:
+            return
+        try:
+            chunk = self._downsampler.feed(block)
+            if chunk:
+                self._system_tap(chunk)
+        except Exception:
+            log.exception("the subtitle tap failed, dropping it for this recording")
+            self._system_tap = None
 
     @property
     def is_recording(self):

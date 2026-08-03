@@ -4,6 +4,8 @@ One Ctrl+Space then starts two dictations, transcribes twice and pastes the text
 document twice, with nothing on screen to explain it. This is what stops that.
 """
 
+import uuid
+
 import pytest
 from PyQt6.QtCore import QCoreApplication
 
@@ -16,9 +18,15 @@ def app():
 
 
 @pytest.fixture
-def owner(app):
+def lock_name():
+    """A lock of the tests' own, so a running application does not fail the suite."""
+    return f"AudioRecorder.test-{uuid.uuid4().hex}"
+
+
+@pytest.fixture
+def owner(app, lock_name):
     """The copy that got there first, cleaned up afterwards."""
-    instance = SingleInstance()
+    instance = SingleInstance(lock_name)
     assert instance.take_ownership(), "the first copy must be allowed to run"
     yield instance
     if instance._server is not None:
@@ -30,7 +38,7 @@ class TestSingleInstance:
         assert owner._server is not None
 
     def test_a_second_copy_is_refused(self, owner):
-        second = SingleInstance()
+        second = SingleInstance(owner._name)
         assert second.take_ownership() is False
         assert second._server is None
 
@@ -38,7 +46,7 @@ class TestSingleInstance:
         asked = []
         owner.another_instance_started.connect(lambda: asked.append(True))
 
-        SingleInstance().take_ownership()
+        SingleInstance(owner._name).take_ownership()
         for _ in range(50):
             app.processEvents()
             if asked:
@@ -50,7 +58,7 @@ class TestSingleInstance:
         owner._server.close()
         owner._server = None
 
-        successor = SingleInstance()
+        successor = SingleInstance(owner._name)
         try:
             assert successor.take_ownership(), "closing the app must free the lock"
         finally:

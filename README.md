@@ -40,9 +40,23 @@ button reports that plainly and nothing else breaks.
 pasted where you are typing. Ctrl+Shift+Space translates as it goes. A small pill at the
 bottom of the screen shows that it is listening, and your clipboard is put back afterwards.
 
+**Subtitles a call as it happens.** Switch on **RTS Translate** and, while a recording runs,
+what the other side says appears under the level meters, newest at the top: the original
+above, the translation into your configured language below. A sentence already spoken in
+that language is shown once, on its own. The recording is untouched, so the transcript and
+the summary still happen afterwards as they always did, and what the subtitles showed is
+kept beside the recording as a `.live.md` file.
+
+It is off by default, and it should be: it streams the whole call to Soniox in real time,
+and the recording is transcribed again afterwards for the summary. You are billed for both.
+The button is green whenever a live session is running, and switching it off ends that
+session immediately, mid-recording included.
+
+![Live subtitles during a recording](docs/screenshot-subtitles.png)
+
 **Keeps the library on disk.** There is no database. An `.m4a` in the output directory is a
 recording, a `.md` next to it means it has been transcribed. Rename, move or delete from the
-list and the transcript and summary follow along.
+list and the transcript, the summary and the subtitles follow along.
 
 ![Settings](docs/screenshot-settings.png)
 
@@ -57,6 +71,7 @@ please report what you find.
 | Microphone recording | yes | yes, asks for permission | yes |
 | System audio | yes, straight from the default output | needs a virtual device, see below | needs a `.monitor` source, see below |
 | Transcription and summaries | yes | yes | yes |
+| Live subtitles (RTS Translate) | yes | only with a system source | only with a monitor source |
 | Dictation hotkey | yes | yes, needs Accessibility permission | X11 only, not on Wayland |
 | Paste after dictation | yes | yes, sends Cmd+V | X11, and needs `xclip` or `xsel` |
 | Tested by the maintainer | yes | no | no |
@@ -122,7 +137,9 @@ Recordings, transcripts and summaries are files in the output directory you choo
 scans, syncs or uploads them on its own.
 
 Audio leaves your computer only when you ask for it: the Transcribe button uploads that one
-recording to Soniox, and dictation streams your microphone to Soniox while you hold the key.
+recording to Soniox, dictation streams your microphone to Soniox while you hold the key, and
+RTS Translate streams the other side of the call to Soniox for as long as it is switched on
+and a recording is running.
 The Cleanup button runs the Claude CLI on your machine, which sends the transcript to Anthropic
 under whatever agreement your Claude account has. Read the privacy terms of both services and
 decide whether the calls you record belong there. There is no telemetry and no account of our

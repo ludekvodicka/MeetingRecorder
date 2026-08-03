@@ -4,6 +4,22 @@ from pathlib import Path
 
 import av
 
+# Everything written beside a recording and named after it. One list, because delete,
+# rename and move each used to carry their own idea of what belongs to a recording, and
+# delete's idea left the summary behind.
+SIDECAR_SUFFIXES = (".md", ".summary.md", ".live.md")
+
+
+def sidecars(recording_path):
+    """The companion files that exist for this recording."""
+    recording = Path(recording_path)
+    candidates = (recording.with_name(recording.stem + suffix) for suffix in SIDECAR_SUFFIXES)
+    return [path for path in candidates if path.exists()]
+
+
+def _suffix_of(recording, sidecar):
+    return sidecar.name[len(recording.stem):]
+
 
 @dataclass
 class Recording:
@@ -58,17 +74,16 @@ class RecordingManager:
         p = Path(recording_path)
         if p.exists():
             p.unlink()
-        md = p.with_suffix(".md")
-        if md.exists():
-            md.unlink()
+        for sidecar in sidecars(recording_path):
+            sidecar.unlink()
 
     def rename(self, recording_path, new_name):
         p = Path(recording_path)
         new_path = p.parent / f"{new_name}.m4a"
         if new_path.exists():
             raise FileExistsError(f"File already exists: {new_path}")
+        companions = sidecars(recording_path)
         p.rename(new_path)
-        md = p.with_suffix(".md")
-        if md.exists():
-            md.rename(new_path.with_suffix(".md"))
+        for sidecar in companions:
+            sidecar.rename(new_path.with_name(new_name + _suffix_of(p, sidecar)))
         return str(new_path)
