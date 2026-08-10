@@ -1,3 +1,5 @@
+import sys
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -46,6 +48,15 @@ class SettingsDialog(QDialog):
         self._meeting_detection.setChecked(
             self.config.get("meeting_detection", True))
         general_layout.addRow("", self._meeting_detection)
+
+        self._calendar_detection = QCheckBox(
+            "Use macOS Calendar for scheduled meeting prompts")
+        self._calendar_detection.setChecked(
+            self.config.get("calendar_detection", False))
+        self._calendar_detection.setEnabled(self._meeting_detection.isChecked())
+        self._calendar_detection.setVisible(sys.platform == "darwin")
+        self._meeting_detection.toggled.connect(self._calendar_detection.setEnabled)
+        general_layout.addRow("", self._calendar_detection)
 
         layout.addWidget(general_group)
 
@@ -164,6 +175,7 @@ class SettingsDialog(QDialog):
     def _save_and_close(self):
         self.config["output_dir"] = self._dir_edit.text()
         self.config["meeting_detection"] = self._meeting_detection.isChecked()
+        self.config["calendar_detection"] = self._calendar_detection.isChecked()
 
         lang_map = {0: "cs", 1: "en", 2: "auto"}
         self.config["language"] = lang_map.get(self._lang_combo.currentIndex(), "en")

@@ -28,6 +28,7 @@ def dialog(app, monkeypatch, tmp_path):
     built = SettingsDialog({
         "output_dir": str(tmp_path),
         "meeting_detection": False,
+        "calendar_detection": False,
         "language": "en",
         "translation_target": "en",
     })
@@ -37,9 +38,13 @@ def dialog(app, monkeypatch, tmp_path):
 
 def test_the_saved_setting_is_shown(dialog):
     assert not dialog._meeting_detection.isChecked()
+    assert not dialog._calendar_detection.isEnabled()
 
 
 def test_the_popup_can_be_enabled(dialog):
     dialog._meeting_detection.setChecked(True)
+    assert dialog._calendar_detection.isEnabled()
+    dialog._calendar_detection.setChecked(True)
     dialog._save_and_close()
     assert dialog.get_config()["meeting_detection"] is True
+    assert dialog.get_config()["calendar_detection"] is True

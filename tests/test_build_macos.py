@@ -65,6 +65,14 @@ def test_macos_entitlements_include_audio_input():
     assert "com.apple.security.device.audio-input" in contents
 
 
+def test_macos_entitlements_and_privacy_text_include_calendar_access():
+    entitlements = (build.ROOT / "packaging" / "macos.entitlements").read_text(
+        encoding="utf-8")
+    specification = (build.ROOT / "MeetingRecorder.spec").read_text(encoding="utf-8")
+    assert "com.apple.security.personal-information.calendars" in entitlements
+    assert "NSCalendarsFullAccessUsageDescription" in specification
+
+
 @pytest.mark.parametrize(
     ("platform_name", "relative_executable"),
     [

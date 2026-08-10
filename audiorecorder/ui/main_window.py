@@ -26,6 +26,7 @@ from audiorecorder.config import DEFAULT_SUMMARY_PROMPT, save_config
 from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
 from audiorecorder.meetings.browser_bridge import BrowserMeetingBridge
+from audiorecorder.meetings.calendar_detection import create_calendar_detector
 from audiorecorder.meetings.detection import (
     CombinedMeetingDetector,
     MeetingPromptPolicy,
@@ -156,8 +157,12 @@ class MainWindow(QMainWindow):
         self._speaker_segments = []
         self._pending_sidecars = {}
         self._browser_meeting_bridge = BrowserMeetingBridge()
+        self._calendar_meeting_detector = create_calendar_detector()
         self._meeting_detector = CombinedMeetingDetector([
-            create_meeting_detector(), self._browser_meeting_bridge])
+            create_meeting_detector(),
+            self._browser_meeting_bridge,
+            self._calendar_meeting_detector,
+        ])
         self._meeting_prompt_policy = MeetingPromptPolicy()
         self._meeting_prompt = None
         self._overlay = OverlayWidget()
@@ -199,14 +204,22 @@ class MainWindow(QMainWindow):
                     "Browser meeting detection unavailable: localhost port 8765 is busy",
                     8000,
                 )
+            if self.config.get("calendar_detection", False):
+                self._calendar_meeting_detector.start()
+            else:
+                self._calendar_meeting_detector.stop()
             self._meeting_timer.start()
         else:
             self._meeting_timer.stop()
             self._browser_meeting_bridge.stop()
+            self._calendar_meeting_detector.stop()
             if self._meeting_prompt is not None:
                 self._meeting_prompt.close()
 
     def _poll_for_meeting(self):
+        calendar_notice = self._calendar_meeting_detector.pop_notice()
+        if calendar_notice:
+            self._status_bar.showMessage(calendar_notice, 8000)
         candidates = self._meeting_detector.scan()
         candidate = self._meeting_prompt_policy.next_prompt(
             candidates,
@@ -1120,6 +1133,7 @@ class MainWindow(QMainWindow):
             self._stop_dictation()
         self._meeting_timer.stop()
         self._browser_meeting_bridge.stop()
+        self._calendar_meeting_detector.stop()
         # The filter is installed on the whole application, so it goes on being called
         # after this window is gone. Qt then calls it on a half-destroyed object and
         # aborts the process.

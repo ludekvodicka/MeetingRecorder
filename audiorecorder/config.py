@@ -45,6 +45,8 @@ DEFAULTS = {
     # A conservative, local-only signal offers the Record button when a meeting window is
     # stable. It never records automatically and is safe to enable by default.
     "meeting_detection": True,
+    # Calendar access is a separate, sensitive permission and remains opt-in.
+    "calendar_detection": False,
 }
 
 

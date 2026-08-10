@@ -51,6 +51,7 @@ def _runtime_smoke_test(platform_name=None):
     if platform_name == "darwin":
         import CoreAudio  # noqa: F401
         import CoreMedia  # noqa: F401
+        import EventKit  # noqa: F401
         import Quartz  # noqa: F401
         import ScreenCaptureKit  # noqa: F401
 

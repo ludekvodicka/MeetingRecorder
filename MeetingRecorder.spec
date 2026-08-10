@@ -91,6 +91,12 @@ elif sys.platform == "darwin":
                 "Meeting Recorder captures system audio so calls can be recorded.",
             "NSAudioCaptureUsageDescription":
                 "Meeting Recorder captures system audio so calls can be recorded.",
+            "NSCalendarsFullAccessUsageDescription":
+                "Meeting Recorder reads upcoming meetings to offer recording at the "
+                "scheduled start time.",
+            "NSCalendarsUsageDescription":
+                "Meeting Recorder reads upcoming meetings to offer recording at the "
+                "scheduled start time.",
             "NSHighResolutionCapable": True,
         },
     )
