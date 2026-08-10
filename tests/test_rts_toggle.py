@@ -150,12 +150,13 @@ def window(app, tmp_path, monkeypatch):
 
     built = []
 
-    def build(rts_translate, live_speakers=False):
+    def build(rts_translate, live_speakers=False, automatic_recording=False):
         w = MainWindow({
             "output_dir": str(tmp_path),
             "rts_translate": rts_translate,
             "live_speakers": live_speakers,
             "meeting_detection": False,
+            "automatic_recording": automatic_recording,
             "language": "en",
             "translation_target": "cs",
         })
@@ -403,6 +404,63 @@ class TestMeetingPopupIntegration:
         w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
         w._poll_for_meeting()
         assert w._meeting_prompt is None
+
+    def test_opt_in_uses_a_cancelable_countdown_for_native_calls(self, window):
+        w = window(rts_translate=False, automatic_recording=True)
+        w._meeting_detector = self.Detector(self.candidate)
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        w._poll_for_meeting()
+        prompt = w._meeting_prompt
+        assert prompt.is_automatic
+        for _ in range(mw.AUTO_START_SECONDS):
+            prompt._tick()
+        assert w._is_recording
+
+    def test_calendar_signal_never_automatically_starts_recording(self, window):
+        calendar = MeetingCandidate(
+            "calendar:1", "Calendar", "Project sync", source="calendar")
+        w = window(rts_translate=False, automatic_recording=True)
+        w._meeting_detector = self.Detector(calendar)
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        w._poll_for_meeting()
+        assert not w._meeting_prompt.is_automatic
+        w._meeting_prompt.reject()
+
+    def test_disappearing_call_cancels_the_countdown(self, window):
+        detector = self.Detector(self.candidate)
+        w = window(rts_translate=False, automatic_recording=True)
+        w._meeting_detector = detector
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        w._poll_for_meeting()
+        assert w._meeting_prompt is not None
+        detector.candidate = None
+        detector.scan = lambda: []
+        w._poll_for_meeting()
+        assert w._meeting_prompt is None
+        assert not w._is_recording
+
+    def test_last_second_stale_signal_cannot_start_recording(self, window):
+        detector = self.Detector(self.candidate)
+        w = window(rts_translate=False, automatic_recording=True)
+        w._meeting_detector = detector
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        w._poll_for_meeting()
+        prompt = w._meeting_prompt
+        for _ in range(mw.AUTO_START_SECONDS - 1):
+            prompt._tick()
+        detector.scan = lambda: []
+        prompt._tick()
+        assert not w._is_recording
+
+    def test_start_now_is_an_explicit_override_of_the_detector(self, window):
+        detector = self.Detector(self.candidate)
+        w = window(rts_translate=False, automatic_recording=True)
+        w._meeting_detector = detector
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        w._poll_for_meeting()
+        detector.scan = lambda: []
+        w._meeting_prompt.accept()
+        assert w._is_recording
 
 
 class TestTheButtonShowsItIsOn:

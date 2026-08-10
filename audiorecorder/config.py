@@ -47,6 +47,9 @@ DEFAULTS = {
     "meeting_detection": True,
     # Calendar access is a separate, sensitive permission and remains opt-in.
     "calendar_detection": False,
+    # Automatic start is deliberately separate from detection and always has a visible
+    # cancelable countdown. Calendar-only signals never qualify.
+    "automatic_recording": False,
 }
 
 

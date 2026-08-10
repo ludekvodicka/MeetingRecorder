@@ -58,6 +58,17 @@ class SettingsDialog(QDialog):
         self._meeting_detection.toggled.connect(self._calendar_detection.setEnabled)
         general_layout.addRow("", self._calendar_detection)
 
+        self._automatic_recording = QCheckBox(
+            "Auto-start app/browser calls (10-second countdown)")
+        self._automatic_recording.setChecked(
+            self.config.get("automatic_recording", False))
+        self._automatic_recording.setEnabled(self._meeting_detection.isChecked())
+        self._meeting_detection.toggled.connect(self._automatic_recording.setEnabled)
+        self._automatic_recording.setToolTip(
+            "Off by default. A visible countdown always allows cancellation. "
+            "Calendar-only signals never start recording automatically.")
+        general_layout.addRow("", self._automatic_recording)
+
         layout.addWidget(general_group)
 
         # --- Audio ---
@@ -176,6 +187,7 @@ class SettingsDialog(QDialog):
         self.config["output_dir"] = self._dir_edit.text()
         self.config["meeting_detection"] = self._meeting_detection.isChecked()
         self.config["calendar_detection"] = self._calendar_detection.isChecked()
+        self.config["automatic_recording"] = self._automatic_recording.isChecked()
 
         lang_map = {0: "cs", 1: "en", 2: "auto"}
         self.config["language"] = lang_map.get(self._lang_combo.currentIndex(), "en")

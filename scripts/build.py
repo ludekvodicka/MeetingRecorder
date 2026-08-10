@@ -28,6 +28,8 @@ DIST = ROOT / "dist"
 RELEASE = ROOT / "release"
 SPEC = ROOT / "MeetingRecorder.spec"
 ASSETS = ROOT / "audiorecorder" / "assets"
+BROWSER_EXTENSION = ROOT / "browser-extension"
+QUICK_START = ROOT / "docs" / "next-meeting-quick-start.md"
 
 sys.path.insert(0, str(ROOT))
 from audiorecorder.version import __version__  # noqa: E402
@@ -129,8 +131,13 @@ def package_macos():
     target = RELEASE / f"{ARTIFACT_STEM}-{__version__}-{arch_tag()}.dmg"
     target.unlink(missing_ok=True)
     run(["codesign", "--verify", "--deep", "--strict", str(app)])
-    run(["hdiutil", "create", "-volname", PRODUCT, "-srcfolder", str(app),
-         "-ov", "-format", "UDZO", str(target)])
+    staging = RELEASE / ".meeting-recorder-dmg"
+    prepare_macos_dmg_root(app, staging)
+    try:
+        run(["hdiutil", "create", "-volname", PRODUCT, "-srcfolder", str(staging),
+             "-ov", "-format", "UDZO", str(target)])
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     if notary_profile:
         run([
             "xcrun", "notarytool", "submit", str(target),
@@ -143,6 +150,17 @@ def package_macos():
             "context:primary-signature", "--verbose=2", str(target),
         ])
     return [target]
+
+
+def prepare_macos_dmg_root(app, target):
+    """Stage the app, browser companion, quick start, and Applications shortcut."""
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True)
+    shutil.copytree(app, target / app.name, symlinks=True)
+    shutil.copytree(BROWSER_EXTENSION, target / "Meeting Recorder Browser Extension")
+    shutil.copy2(QUICK_START, target / "READ ME - Next Meeting.md")
+    (target / "Applications").symlink_to("/Applications", target_is_directory=True)
 
 
 def package_linux():

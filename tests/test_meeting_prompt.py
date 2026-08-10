@@ -41,3 +41,35 @@ def test_not_now_rejects_the_prompt(prompt):
     prompt.rejected.connect(lambda: rejected.append(True))
     button(prompt, "Not Now").click()
     assert rejected == [True]
+
+
+def test_automatic_prompt_counts_down_and_accepts(app):
+    prompt = MeetingPrompt(
+        MeetingCandidate("1:2", "Zoom", "Project sync"),
+        auto_start_seconds=2,
+    )
+    accepted = []
+    prompt.accepted.connect(lambda: accepted.append(True))
+    try:
+        assert prompt.is_automatic
+        assert "2 seconds" in prompt._message.text()
+        prompt._tick()
+        assert "1 second" in prompt._message.text()
+        prompt._tick()
+        assert accepted == [True]
+        assert prompt.countdown_elapsed
+    finally:
+        prompt.deleteLater()
+
+
+def test_cancel_stops_the_automatic_timer(app):
+    prompt = MeetingPrompt(
+        MeetingCandidate("1:2", "Zoom", "Project sync"),
+        auto_start_seconds=10,
+    )
+    try:
+        assert prompt._countdown.isActive()
+        button(prompt, "Cancel").click()
+        assert not prompt._countdown.isActive()
+    finally:
+        prompt.deleteLater()

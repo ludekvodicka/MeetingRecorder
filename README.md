@@ -53,6 +53,24 @@ and the recording is transcribed again afterwards for the summary. You are bille
 The button is green whenever a live session is running, and switching it off ends that
 session immediately, mid-recording included.
 
+**Labels speakers live.** Switch on **Live Speakers** to send the microphone and system
+audio through separate realtime streams. Microphone speech is labelled **Me**; the remote
+track is diarized as **Remote 1**, **Remote 2**, and so on. As labels appear, **Name
+Speakers** maps them to participant names. The final mapping applies to the complete call and
+is saved as both `.speakers.md` and structured `.speakers.json` after the M4A safely encodes.
+Live labels are immediate aids; the later batch transcription remains more accurate. This
+feature is off by default and adds up to two paid Soniox realtime streams.
+
+**Offers recording when a meeting appears.** On macOS, stable Teams, Zoom, Webex, and Slack
+Huddle windows produce a non-modal recording prompt. An optional least-privilege Chrome/Edge
+companion covers Google Meet, Zoom Web, and Teams Web. It can see only those meeting pages,
+has no history/tab-capture permission, and reports to `127.0.0.1` only. macOS Calendar is a
+separate opt-in signal for imminent events with attendees or a recognized conference link.
+
+Automatic recording is also a separate opt-in. It applies only to a detected app/browser
+call, always shows a 10-second **Cancel** countdown, and cancels if the meeting disappears.
+A Calendar event by itself never starts recording.
+
 ![Live subtitles during a recording](docs/screenshot-subtitles.png)
 
 **Keeps the library on disk.** There is no database. An `.m4a` in the output directory is a
@@ -73,6 +91,10 @@ please report what you find.
 | System audio | yes, straight from the default output | native on macOS 13+; BlackHole fallback | needs a `.monitor` source, see below |
 | Transcription and summaries | yes | yes | yes |
 | Live subtitles (RTS Translate) | yes | yes on macOS 13+ | only with a monitor source |
+| Live speaker labels | yes | yes on macOS 13+ | only with a monitor source |
+| Native meeting popup | no | Teams, Zoom, Webex, Slack Huddles | no |
+| Browser meeting popup | optional Chrome/Edge companion | optional Chrome/Edge companion | optional Chrome/Edge companion |
+| Calendar meeting signal | no | opt-in through EventKit | no |
 | Dictation hotkey | yes | yes, needs Accessibility permission | X11 only, not on Wayland |
 | Paste after dictation | yes | yes, sends Cmd+V | X11, and needs `xclip` or `xsel` |
 | Tested by the maintainer | yes | no | no |
@@ -116,7 +138,9 @@ certutil -hashfile Meeting-Recorder-0.2.0-x64.exe SHA256    # Windows Command Pr
   about an unknown publisher.
 - **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
   On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
-  `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across.
+  `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across. The DMG also
+  contains the optional unpacked browser companion and a next-meeting quick start. Copy the
+  companion folder to a permanent location before loading it in Chrome or Edge.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 
@@ -141,6 +165,12 @@ and replugging a headset does not silently switch you to a different microphone.
 **macOS permissions.** The first recording asks for Microphone and Screen & System Audio
 Recording access. After granting screen/audio capture, restart the app. Dictation separately
 needs Accessibility access so the global hotkey and Cmd+V can reach other applications.
+Calendar access is requested only after its Settings checkbox is enabled; EventKit exposes no
+read-only tier, but Meeting Recorder only reads a narrow upcoming-event window and never edits
+events.
+
+For a complete install-to-first-call walkthrough, use
+[the next-meeting quick start](docs/next-meeting-quick-start.md).
 
 ## Your data stays on your machine
 
@@ -150,7 +180,10 @@ scans, syncs or uploads them on its own.
 Audio leaves your computer only when you ask for it: the Transcribe button uploads that one
 recording to Soniox, dictation streams your microphone to Soniox while you hold the key, and
 RTS Translate streams the other side of the call to Soniox for as long as it is switched on
-and a recording is running.
+and a recording is running. Live Speakers streams the microphone and system tracks to separate
+Soniox realtime sessions while its toggle and a recording are active. Meeting detection stays
+local: native window titles, optional Calendar events, and sanitized browser-companion
+heartbeats are not uploaded.
 The Cleanup button runs the Claude CLI on your machine, which sends the transcript to Anthropic
 under whatever agreement your Claude account has. Read the privacy terms of both services and
 decide whether the calls you record belong there. There is no telemetry and no account of our

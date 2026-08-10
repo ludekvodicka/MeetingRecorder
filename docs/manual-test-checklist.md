@@ -88,6 +88,19 @@ and say in the release notes what was not exercised.
       explicit system source still captures system sound
 - [ ] Record, stop, then record again in the same app process; native capture starts both times
 - [ ] Switch RTS Translate on and confirm native system audio feeds live subtitles
+- [ ] Switch Live Speakers on: microphone speech appears as Me and two remote voices remain
+      distinct as Remote labels; Name Speakers updates future lines
+- [ ] Stop after naming speakers: `.speakers.md` and `.speakers.json` appear only after the
+      M4A succeeds, contain the final names for earlier lines too, and follow rename/delete
+- [ ] Open a Teams or Zoom meeting window: one prompt appears after the stable detection;
+      dismissing it does not produce another prompt until that meeting window disappears
+- [ ] Copy and load the DMG's browser companion in Chrome/Edge, open a Google Meet code URL,
+      and confirm the same prompt; moving to a non-meeting page removes the signal
+- [ ] Enable Calendar detection, grant Calendar access, and confirm an imminent attended or
+      linked event prompts while a personal reminder and an all-day event do not
+- [ ] Enable automatic recording, open a detected app/browser meeting, and cancel the visible
+      10-second countdown; repeat and let it finish; confirm Calendar alone never counts down
+- [ ] Begin a countdown and close the meeting before zero: no recording starts
 - [ ] Dictation asks for Accessibility permission, and works once it is granted
 - [ ] Paste sends Cmd+V, not Ctrl+V
 - [ ] Note whether Ctrl+Space collides with the input source switcher on this machine

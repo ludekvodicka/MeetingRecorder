@@ -54,6 +54,9 @@ from audiorecorder.version import __version__
 
 log = logging.getLogger(__name__)
 
+AUTO_START_SECONDS = 10
+AUTO_START_SOURCES = frozenset({"native-window", "browser-extension"})
+
 # Both header toggles look the same when they are on: green means this is costing you
 # a live Soniox session.
 ACTIVE_TOGGLE_STYLE = """
@@ -221,13 +224,28 @@ class MainWindow(QMainWindow):
         if calendar_notice:
             self._status_bar.showMessage(calendar_notice, 8000)
         candidates = self._meeting_detector.scan()
+        if (self._meeting_prompt is not None
+                and self._meeting_prompt.is_automatic
+                and self._meeting_prompt.candidate.key
+                not in {candidate.key for candidate in candidates}):
+            self._meeting_prompt_policy.next_prompt(candidates, blocked=True)
+            self._meeting_prompt.reject()
+            return
         candidate = self._meeting_prompt_policy.next_prompt(
             candidates,
             blocked=self._is_recording or self._meeting_prompt is not None,
         )
         if candidate is None:
             return
-        prompt = MeetingPrompt(candidate, self)
+        automatic = (
+            self.config.get("automatic_recording", False)
+            and candidate.source in AUTO_START_SOURCES
+        )
+        prompt = MeetingPrompt(
+            candidate,
+            self,
+            auto_start_seconds=AUTO_START_SECONDS if automatic else None,
+        )
         self._meeting_prompt = prompt
         prompt.accepted.connect(self._start_detected_meeting)
         prompt.finished.connect(
@@ -243,6 +261,13 @@ class MainWindow(QMainWindow):
         prompt.deleteLater()
 
     def _start_detected_meeting(self):
+        prompt = self._meeting_prompt
+        if prompt is not None and prompt.countdown_elapsed:
+            active = {candidate.key for candidate in self._meeting_detector.scan()}
+            if prompt.candidate.key not in active:
+                self._status_bar.showMessage(
+                    "Automatic recording cancelled because the meeting ended", 5000)
+                return
         self.showNormal()
         self.raise_()
         self.activateWindow()

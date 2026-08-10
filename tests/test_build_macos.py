@@ -49,6 +49,19 @@ def test_macos_package_can_notarize_and_staple(macos_package, monkeypatch):
     ]
 
 
+def test_macos_dmg_stages_the_browser_companion_and_quick_start(tmp_path):
+    app = tmp_path / "Meeting Recorder.app"
+    app.mkdir()
+    target = tmp_path / "dmg"
+
+    build.prepare_macos_dmg_root(app, target)
+
+    assert (target / "Meeting Recorder.app").is_dir()
+    assert (target / "Meeting Recorder Browser Extension" / "manifest.json").is_file()
+    assert (target / "READ ME - Next Meeting.md").is_file()
+    assert (target / "Applications").is_symlink()
+
+
 def test_notarization_requires_a_real_signing_identity(macos_package, monkeypatch):
     monkeypatch.delenv("MACOS_CODESIGN_IDENTITY", raising=False)
     monkeypatch.setenv("MACOS_NOTARY_PROFILE", "meeting-recorder-notary")
