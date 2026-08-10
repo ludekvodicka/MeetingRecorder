@@ -66,6 +66,14 @@ class TestSpeakerLines:
         assert "<Me>" in text
         assert "<b>literal</b>" in text
 
+    def test_mapping_button_only_enables_after_a_remote_speaker_appears(self, view):
+        view.set_speaker_mapping_visible(True)
+        view.set_speaker_mapping_available(0)
+        assert not view._btn_speaker_names.isEnabled()
+        view.set_speaker_mapping_available(2)
+        assert view._btn_speaker_names.isEnabled()
+        assert "(2)" in view._btn_speaker_names.text()
+
 
 class TestPendingLine:
     def test_the_pending_line_is_replaced_not_appended(self, view):

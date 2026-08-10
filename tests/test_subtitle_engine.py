@@ -430,6 +430,20 @@ class TestLiveSpeakers:
         finally:
             engine.stop(timeout=2)
 
+    def test_merge_timestamps_preserve_cross_stream_order(self):
+        engine = self.speaker_engine(speaker_label="Me")
+        try:
+            FakeSession.instances[-1].speakers_say([
+                {"text": "First.", "is_final": True},
+                {"text": "Second.", "is_final": True},
+            ])
+            assert wait_for(lambda: len(engine.timed_speaker_transcript()) == 2)
+            timed = engine.timed_speaker_transcript()
+            assert timed[0][0] < timed[1][0]
+            assert timed[0][1:] == engine.speaker_transcript()[0]
+        finally:
+            engine.stop(timeout=2)
+
 
 class TestSpeechAlreadyInTheTargetLanguage:
     """A Czech sentence on a call being translated into Czech has no counterpart.

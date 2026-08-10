@@ -28,6 +28,10 @@ from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedErr
 from audiorecorder.recordings.manager import RecordingManager, sidecars
 from audiorecorder.subtitles.document import write_live_transcript
 from audiorecorder.subtitles.engine import SubtitleEngine
+from audiorecorder.subtitles.speaker_document import (
+    resolve_speaker,
+    write_speaker_sidecars,
+)
 from audiorecorder.transcription.cleanup import CleanupWorker
 from audiorecorder.transcription.markdown import language_name
 from audiorecorder.transcription.soniox import SonioxWorker
@@ -36,6 +40,7 @@ from audiorecorder.ui.level_bars import DualLevelBars
 from audiorecorder.ui.overlay import OverlayWidget
 from audiorecorder.ui.recording_list import RecordingListWidget
 from audiorecorder.ui.settings_dialog import SettingsDialog
+from audiorecorder.ui.speaker_mapping import SpeakerMappingDialog
 from audiorecorder.ui.subtitles import SubtitleView
 from audiorecorder.version import __version__
 
@@ -139,6 +144,10 @@ class MainWindow(QMainWindow):
         self._subtitle_engine = None
         self._mic_speaker_engine = None
         self._remote_speaker_engine = None
+        self._speaker_name_map = {}
+        self._observed_remote_speakers = set()
+        self._speaker_segments = []
+        self._pending_sidecars = {}
         self._overlay = OverlayWidget()
         self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active, self)
         QApplication.instance().installEventFilter(self._hotkey_filter)
@@ -286,6 +295,9 @@ class MainWindow(QMainWindow):
 
         # --- Live subtitles, only while they are wanted ---
         self._subtitles = SubtitleView()
+        self._subtitles.speaker_names_requested.connect(self._name_speakers)
+        self._subtitles.set_speaker_mapping_visible(
+            self._btn_live_speakers.isChecked())
         self._subtitles.setVisible(
             self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
         layout.addWidget(self._subtitles, stretch=1)
@@ -372,6 +384,10 @@ class MainWindow(QMainWindow):
         if self._btn_rts.isChecked():
             self._start_subtitles(system_name)
         if self._btn_live_speakers.isChecked():
+            self._speaker_name_map = {}
+            self._observed_remote_speakers = set()
+            self._speaker_segments = []
+            self._subtitles.set_speaker_mapping_available(0)
             self._start_speaker_recognition(system_name)
 
     def _toggle_mute(self):
@@ -427,7 +443,12 @@ class MainWindow(QMainWindow):
         if mic_path:
             output_name = self._manager.generate_filename()
             output_path = os.path.join(self.config["output_dir"], output_name)
-            self._stop_subtitles(output_path)
+            pending = {
+                "subtitles": self._finish_subtitles(),
+                "speakers": self._speaker_sidecar_payload(),
+            }
+            if any(pending.values()):
+                self._pending_sidecars[output_path] = pending
 
             self._status_bar.showMessage("Encoding to M4A...")
 
@@ -441,6 +462,8 @@ class MainWindow(QMainWindow):
             thread.started.connect(worker.run)
             worker.finished.connect(self._on_encode_finished)
             worker.error.connect(self._on_encode_error)
+            worker.error.connect(
+                lambda error, path=output_path: self._pending_sidecars.pop(path, None))
             worker.finished.connect(thread.quit)
             worker.error.connect(thread.quit)
             entry = (thread, worker)
@@ -448,6 +471,7 @@ class MainWindow(QMainWindow):
             thread.finished.connect(lambda e=entry: self._cleanup_encoder(e))
             thread.start()
         else:
+            self._finish_subtitles()
             self._status_bar.showMessage("Recording cancelled (no audio)")
 
     def _on_capture_error(self, message):
@@ -466,7 +490,10 @@ class MainWindow(QMainWindow):
             self._active_encoders.remove(entry)
 
     def _on_encode_finished(self, path):
-        self._status_bar.showMessage(f"Saved: {os.path.basename(path)}", 5000)
+        companions = self._write_pending_sidecars(path)
+        suffix = f" with {len(companions)} live transcript files" if companions else ""
+        self._status_bar.showMessage(
+            f"Saved: {os.path.basename(path)}{suffix}", 5000)
         self._refresh_list()
         self._recording_list.highlight_path(path)
 
@@ -720,6 +747,7 @@ class MainWindow(QMainWindow):
         save_config(self.config)
         self._update_live_view_visibility()
         self._btn_live_speakers.setStyleSheet(ACTIVE_TOGGLE_STYLE if wanted else "")
+        self._subtitles.set_speaker_mapping_visible(wanted)
         if wanted:
             self._status_bar.showMessage("Speaker labels start with the next recording", 5000)
         elif self._mic_speaker_engine is not None or self._remote_speaker_engine is not None:
@@ -758,7 +786,7 @@ class MainWindow(QMainWindow):
                    (self._mic_speaker_engine, self._remote_speaker_engine)
                    if engine is not None]
         for engine in engines:
-            engine.speaker_line_finalized.connect(self._subtitles.append_speaker_line)
+            engine.speaker_line_finalized.connect(self._on_speaker_line)
             engine.notice.connect(
                 lambda message: self._status_bar.showMessage(message, 8000))
             engine.error_occurred.connect(self._on_subtitle_error)
@@ -785,7 +813,40 @@ class MainWindow(QMainWindow):
         for engine in engines:
             if engine is not None:
                 engine.wait_stopped()
+        merged = []
+        for engine in engines:
+            if engine is not None:
+                merged.extend(engine.timed_speaker_transcript())
+        self._speaker_segments.extend(merged)
+        self._speaker_segments.sort(key=lambda line: line[0])
         self._refresh_audio_taps()
+
+    def _on_speaker_line(self, timestamp, speaker_id, text):
+        if speaker_id != "Me":
+            self._observed_remote_speakers.add(speaker_id)
+            self._subtitles.set_speaker_mapping_available(
+                len(self._observed_remote_speakers))
+        self._subtitles.append_speaker_line(
+            timestamp, resolve_speaker(speaker_id, self._speaker_name_map), text)
+
+    def _name_speakers(self):
+        if not self._observed_remote_speakers:
+            return
+        dialog = SpeakerMappingDialog(
+            self._observed_remote_speakers, self._speaker_name_map, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        for speaker_id in self._observed_remote_speakers:
+            self._speaker_name_map.pop(speaker_id, None)
+        self._speaker_name_map.update(dialog.mappings())
+        self._status_bar.showMessage(
+            "Speaker names will be used for new live lines and the complete sidecar", 6000)
+
+    def _speaker_sidecar_payload(self):
+        lines = [line[1:] for line in self._speaker_segments]
+        if not lines:
+            return None
+        return lines, dict(self._speaker_name_map)
 
     def _refresh_audio_taps(self):
         """Attach each active realtime consumer without doing work in audio callbacks."""
@@ -803,22 +864,39 @@ class MainWindow(QMainWindow):
         self._capture.set_system_tap(_fanout(system_consumers))
         self._capture.set_mic_tap(_fanout(mic_consumers))
 
-    def _stop_subtitles(self, recording_path):
-        """Ends the session and keeps what it heard beside the recording."""
+    def _finish_subtitles(self):
+        """End the session and retain its result until the M4A safely exists."""
         if self._subtitle_engine is None:
-            return
+            return None
         engine = self._subtitle_engine
         self._subtitle_engine = None
         engine.stop()
         self._subtitles.set_pending("", "")
-        try:
-            written = write_live_transcript(
-                recording_path, engine.transcript(), engine.target_language)
-        except OSError:
-            log.exception("the live subtitle sidecar could not be written")
-            return
-        if written is not None:
-            self._status_bar.showMessage(f"Subtitles saved: {written.name}", 5000)
+        lines = engine.transcript()
+        return (lines, engine.target_language) if lines else None
+
+    def _write_pending_sidecars(self, recording_path):
+        pending = self._pending_sidecars.pop(recording_path, None)
+        if pending is None:
+            return []
+        written = []
+        subtitle_payload = pending.get("subtitles")
+        if subtitle_payload:
+            try:
+                path = write_live_transcript(recording_path, *subtitle_payload)
+                if path is not None:
+                    written.append(path)
+            except OSError:
+                log.exception("the live subtitle sidecar could not be written")
+        speaker_payload = pending.get("speakers")
+        if speaker_payload:
+            try:
+                paths = write_speaker_sidecars(recording_path, *speaker_payload)
+                if paths is not None:
+                    written.extend(paths)
+            except OSError:
+                log.exception("the live speaker sidecars could not be written")
+        return written
 
     def _on_subtitle_error(self, message):
         log.error("subtitles failed: %s", message)

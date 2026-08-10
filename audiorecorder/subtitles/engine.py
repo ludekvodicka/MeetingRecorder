@@ -94,7 +94,7 @@ class SubtitleEngine(QObject):
         self._sent_plain = 0
         self._held_original = ""
         self._held_translation = ""
-        self._speaker_lines = []
+        self._timed_speaker_lines = []
         self._held_speaker = None
         self._held_speaker_text = ""
 
@@ -118,7 +118,12 @@ class SubtitleEngine(QObject):
     def speaker_transcript(self):
         """Finalized ``(time, speaker, text)`` lines, safe after :meth:`stop`."""
         with self._lock:
-            return list(self._speaker_lines)
+            return [line[1:] for line in self._timed_speaker_lines]
+
+    def timed_speaker_transcript(self):
+        """Internal merge form: monotonic sequence time followed by the public line."""
+        with self._lock:
+            return list(self._timed_speaker_lines)
 
     def start(self):
         if self._running:
@@ -285,7 +290,7 @@ class SubtitleEngine(QObject):
         if not text:
             return None
         line = (_now(), speaker, text)
-        self._speaker_lines.append(line)
+        self._timed_speaker_lines.append((time.monotonic_ns(), *line))
         return line
 
     def _flush_speaker_line(self):

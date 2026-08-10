@@ -10,9 +10,17 @@ them together: QTextEdit merges adjacent block elements when HTML is inserted, s
 alone cannot decide where a line ends.
 """
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QTextCursor
-from PyQt6.QtWidgets import QLabel, QSizePolicy, QTextEdit, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 TIME_COLOUR = "#6f6f6f"
 ORIGINAL_COLOUR = "#9a9a9a"
@@ -21,6 +29,8 @@ SPEAKER_COLOUR = "#80cbc4"
 
 
 class SubtitleView(QWidget):
+    speaker_names_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -29,7 +39,17 @@ class SubtitleView(QWidget):
 
         self._heading = QLabel("Live subtitles")
         self._heading.setStyleSheet("color: #888; font-size: 11px;")
-        layout.addWidget(self._heading)
+        heading_row = QHBoxLayout()
+        heading_row.addWidget(self._heading)
+        heading_row.addStretch()
+        self._btn_speaker_names = QPushButton("Name Speakers")
+        self._btn_speaker_names.setToolTip(
+            "Assign participant names to the Remote 1, Remote 2, etc. labels.")
+        self._btn_speaker_names.clicked.connect(self.speaker_names_requested.emit)
+        self._btn_speaker_names.setVisible(False)
+        self._btn_speaker_names.setEnabled(False)
+        heading_row.addWidget(self._btn_speaker_names)
+        layout.addLayout(heading_row)
 
         # Above the settled lines, because the newest text is at the top.
         self._pending = QLabel("")
@@ -57,6 +77,14 @@ class SubtitleView(QWidget):
 
     def set_status(self, text):
         self._heading.setText(text)
+
+    def set_speaker_mapping_visible(self, visible):
+        self._btn_speaker_names.setVisible(visible)
+
+    def set_speaker_mapping_available(self, count):
+        self._btn_speaker_names.setEnabled(count > 0)
+        self._btn_speaker_names.setText(
+            f"Name Speakers ({count})" if count else "Name Speakers")
 
     def append_line(self, timestamp, original, translation):
         """A settled line, inserted at the top so the newest is always in view.

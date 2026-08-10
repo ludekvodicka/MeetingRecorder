@@ -105,6 +105,9 @@ class FakeEngine:
     def transcript(self):
         return []
 
+    def timed_speaker_transcript(self):
+        return []
+
     # The window connects to these; a plain object with connect() is enough.
     class _Signal:
         def connect(self, slot):
@@ -324,6 +327,39 @@ class TestLiveSpeakerToggle:
         w._start_recording()
         w._stop_recording()
         assert all(engine.stopped == 1 for engine in FakeEngine.instances)
+
+    def test_mapped_name_is_used_for_new_live_lines(self, window):
+        w = window(rts_translate=False, live_speakers=True)
+        w._speaker_name_map = {"Remote 1": "Radek Švarz"}
+        w._on_speaker_line("10:00:00", "Remote 1", "Agreed.")
+        text = w._subtitles._settled.toPlainText()
+        assert "Radek Švarz" in text
+        assert w._subtitles._btn_speaker_names.isEnabled()
+
+    def test_complete_sidecar_uses_names_assigned_after_the_line(self, window, tmp_path):
+        w = window(rts_translate=False, live_speakers=True)
+        w._speaker_segments = [(1, "10:00:00", "Remote 1", "Agreed.")]
+        w._speaker_name_map = {"Remote 1": "Radek Švarz"}
+        recording = str(tmp_path / "call.m4a")
+        w._pending_sidecars[recording] = {
+            "subtitles": None,
+            "speakers": w._speaker_sidecar_payload(),
+        }
+        w._write_pending_sidecars(recording)
+        text = (tmp_path / "call.speakers.md").read_text(encoding="utf-8")
+        assert "Radek Švarz" in text
+
+    def test_sidecars_wait_for_successful_encoding(self, window, tmp_path):
+        w = window(rts_translate=False, live_speakers=True)
+        w._speaker_segments = [(1, "10:00:00", "Remote 1", "Agreed.")]
+        recording = str(tmp_path / "call.m4a")
+        w._pending_sidecars[recording] = {
+            "subtitles": None,
+            "speakers": w._speaker_sidecar_payload(),
+        }
+        assert not (tmp_path / "call.speakers.md").exists()
+        w._on_encode_finished(recording)
+        assert (tmp_path / "call.speakers.md").exists()
 
 
 class TestTheButtonShowsItIsOn:

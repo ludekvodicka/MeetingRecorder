@@ -7,7 +7,9 @@ import av
 # Everything written beside a recording and named after it. One list, because delete,
 # rename and move each used to carry their own idea of what belongs to a recording, and
 # delete's idea left the summary behind.
-SIDECAR_SUFFIXES = (".md", ".summary.md", ".live.md")
+SIDECAR_SUFFIXES = (
+    ".md", ".summary.md", ".live.md", ".speakers.md", ".speakers.json",
+)
 
 
 def sidecars(recording_path):
