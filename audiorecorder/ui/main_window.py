@@ -52,6 +52,21 @@ ACTIVE_TOGGLE_STYLE = """
 """
 
 
+def _fanout(consumers):
+    """One non-blocking capture callback for zero, one, or several realtime queues."""
+    consumers = tuple(consumers)
+    if not consumers:
+        return None
+    if len(consumers) == 1:
+        return consumers[0]
+
+    def feed(chunk):
+        for consumer in consumers:
+            consumer(chunk)
+
+    return feed
+
+
 class DictationHotkeyFilter(QObject):
     """Keeps Ctrl+Space away from the widgets while dictation is listening for it.
 
@@ -122,6 +137,8 @@ class MainWindow(QMainWindow):
         self._dictation = None
         self._dictation_active = False
         self._subtitle_engine = None
+        self._mic_speaker_engine = None
+        self._remote_speaker_engine = None
         self._overlay = OverlayWidget()
         self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active, self)
         QApplication.instance().installEventFilter(self._hotkey_filter)
@@ -184,6 +201,18 @@ class MainWindow(QMainWindow):
             ACTIVE_TOGGLE_STYLE if self._btn_rts.isChecked() else "")
         self._btn_rts.clicked.connect(self._toggle_subtitles)
         header.addWidget(self._btn_rts)
+
+        self._btn_live_speakers = QPushButton("Live Speakers")
+        self._btn_live_speakers.setCheckable(True)
+        self._btn_live_speakers.setFixedWidth(105)
+        self._btn_live_speakers.setToolTip(
+            "Label microphone speech as Me and diarize system audio as Remote 1, "
+            "Remote 2, etc. Adds up to two Soniox realtime sessions while recording.")
+        self._btn_live_speakers.setChecked(bool(self.config.get("live_speakers")))
+        self._btn_live_speakers.setStyleSheet(
+            ACTIVE_TOGGLE_STYLE if self._btn_live_speakers.isChecked() else "")
+        self._btn_live_speakers.clicked.connect(self._toggle_live_speakers)
+        header.addWidget(self._btn_live_speakers)
 
         btn_add = QPushButton("Add")
         btn_add.clicked.connect(self._add_files)
@@ -257,7 +286,8 @@ class MainWindow(QMainWindow):
 
         # --- Live subtitles, only while they are wanted ---
         self._subtitles = SubtitleView()
-        self._subtitles.setVisible(self._btn_rts.isChecked())
+        self._subtitles.setVisible(
+            self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
         layout.addWidget(self._subtitles, stretch=1)
 
         # --- Status bar ---
@@ -337,8 +367,12 @@ class MainWindow(QMainWindow):
         else:
             self._status_bar.showMessage("Recording...")
 
+        if self._btn_rts.isChecked() or self._btn_live_speakers.isChecked():
+            self._subtitles.clear()
         if self._btn_rts.isChecked():
             self._start_subtitles(system_name)
+        if self._btn_live_speakers.isChecked():
+            self._start_speaker_recognition(system_name)
 
     def _toggle_mute(self):
         if not self._capture:
@@ -370,8 +404,10 @@ class MainWindow(QMainWindow):
 
         system_path, mic_path = self._capture.stop()
         self._capture.set_system_tap(None)
+        self._capture.set_mic_tap(None)
         self._capture.close()
         self._capture = None
+        self._stop_speaker_recognition()
 
         self._is_recording = False
         self._timer.stop()
@@ -624,7 +660,7 @@ class MainWindow(QMainWindow):
         wanted = self._btn_rts.isChecked()
         self.config["rts_translate"] = wanted
         save_config(self.config)
-        self._subtitles.setVisible(wanted)
+        self._update_live_view_visibility()
         self._btn_rts.setStyleSheet(ACTIVE_TOGGLE_STYLE if wanted else "")
         if wanted:
             # The subtitles read the capture backend, which only exists while recording.
@@ -638,9 +674,8 @@ class MainWindow(QMainWindow):
 
     def _stop_feeding_subtitles(self):
         """Stop sending audio, but keep what was heard for the sidecar."""
-        if self._capture is not None:
-            self._capture.set_system_tap(None)
         self._subtitle_engine.stop()
+        self._refresh_audio_taps()
 
     def _start_subtitles(self, system_source_name):
         if system_source_name is None:
@@ -662,13 +697,11 @@ class MainWindow(QMainWindow):
             self._subtitle_engine = SubtitleEngine(
                 api_key=api_key,
                 translate_to=self.config.get("translation_target"),
-                source_languages=[self.config.get("language"),
-                                  self.config.get("translation_target")])
+                source_languages=self._source_languages())
         except ValueError as e:
             self._subtitles.set_status(str(e))
             return
 
-        self._subtitles.clear()
         target = self._subtitle_engine.target_language
         self._subtitles.set_status(
             f"Live subtitles, translated into {language_name(target)}" if target
@@ -679,7 +712,96 @@ class MainWindow(QMainWindow):
             lambda message: self._status_bar.showMessage(message, 8000))
         self._subtitle_engine.error_occurred.connect(self._on_subtitle_error)
         self._subtitle_engine.start()
-        self._capture.set_system_tap(self._subtitle_engine.feed)
+        self._refresh_audio_taps()
+
+    def _toggle_live_speakers(self):
+        wanted = self._btn_live_speakers.isChecked()
+        self.config["live_speakers"] = wanted
+        save_config(self.config)
+        self._update_live_view_visibility()
+        self._btn_live_speakers.setStyleSheet(ACTIVE_TOGGLE_STYLE if wanted else "")
+        if wanted:
+            self._status_bar.showMessage("Speaker labels start with the next recording", 5000)
+        elif self._mic_speaker_engine is not None or self._remote_speaker_engine is not None:
+            self._stop_speaker_recognition()
+            self._status_bar.showMessage("Live speaker recognition stopped", 5000)
+
+    def _update_live_view_visibility(self):
+        self._subtitles.setVisible(
+            self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
+
+    def _start_speaker_recognition(self, system_source_name):
+        api_key = secrets.get_api_key()
+        if not api_key:
+            self._subtitles.set_status("Live speaker labels need a Soniox API key")
+            self._status_bar.showMessage(
+                "Speaker labels are off: no Soniox API key is configured", 8000)
+            return
+
+        languages = self._source_languages()
+        self._mic_speaker_engine = SubtitleEngine(
+            api_key=api_key,
+            translate_to=None,
+            source_languages=languages,
+            speaker_label="Me",
+        )
+        if system_source_name is not None:
+            self._remote_speaker_engine = SubtitleEngine(
+                api_key=api_key,
+                translate_to=None,
+                source_languages=languages,
+                speaker_prefix="Remote",
+                enable_speaker_diarization=True,
+            )
+
+        engines = [engine for engine in
+                   (self._mic_speaker_engine, self._remote_speaker_engine)
+                   if engine is not None]
+        for engine in engines:
+            engine.speaker_line_finalized.connect(self._subtitles.append_speaker_line)
+            engine.notice.connect(
+                lambda message: self._status_bar.showMessage(message, 8000))
+            engine.error_occurred.connect(self._on_subtitle_error)
+            engine.start()
+
+        if self._btn_rts.isChecked():
+            self._subtitles.set_status("Live subtitles and speaker labels")
+        elif system_source_name is None:
+            self._subtitles.set_status("Live speaker transcript (microphone only)")
+        else:
+            self._subtitles.set_status("Live speaker transcript")
+        self._refresh_audio_taps()
+
+    def _source_languages(self):
+        return [self.config.get("language"), self.config.get("translation_target")]
+
+    def _stop_speaker_recognition(self):
+        engines = (self._mic_speaker_engine, self._remote_speaker_engine)
+        self._mic_speaker_engine = None
+        self._remote_speaker_engine = None
+        for engine in engines:
+            if engine is not None:
+                engine.request_stop()
+        for engine in engines:
+            if engine is not None:
+                engine.wait_stopped()
+        self._refresh_audio_taps()
+
+    def _refresh_audio_taps(self):
+        """Attach each active realtime consumer without doing work in audio callbacks."""
+        if self._capture is None:
+            return
+        system_consumers = []
+        if self._subtitle_engine is not None and self._btn_rts.isChecked():
+            system_consumers.append(self._subtitle_engine.feed)
+        if self._remote_speaker_engine is not None and self._btn_live_speakers.isChecked():
+            system_consumers.append(self._remote_speaker_engine.feed)
+        mic_consumers = []
+        if self._mic_speaker_engine is not None and self._btn_live_speakers.isChecked():
+            mic_consumers.append(self._mic_speaker_engine.feed)
+
+        self._capture.set_system_tap(_fanout(system_consumers))
+        self._capture.set_mic_tap(_fanout(mic_consumers))
 
     def _stop_subtitles(self, recording_path):
         """Ends the session and keeps what it heard beside the recording."""

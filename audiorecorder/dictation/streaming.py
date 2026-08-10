@@ -50,7 +50,8 @@ class SonioxStreamingSession:
     """Manages a single WebSocket session for one dictation recording."""
 
     def __init__(self, api_key, language_hints=None, sample_rate=16000, translate_to=None,
-                 on_preview=None, on_pair=None):
+                 on_preview=None, on_pair=None, on_tokens=None,
+                 enable_speaker_diarization=False):
         self.api_key = api_key
         self.language_hints = language_hints or []
         self.sample_rate = sample_rate
@@ -58,6 +59,10 @@ class SonioxStreamingSession:
         self.on_preview = on_preview
         # Subtitles want both languages as they arrive; dictation only wants the result.
         self.on_pair = on_pair
+        # Structured consumers such as live speaker labels need the token metadata rather
+        # than the flattened text used by dictation and translated subtitles.
+        self.on_tokens = on_tokens
+        self.enable_speaker_diarization = enable_speaker_diarization
         self.ws = None
 
         self._final_tokens = []
@@ -80,7 +85,7 @@ class SonioxStreamingSession:
             "model": "stt-rt-v4",
             # With no hint to go on, ask the server to work the language out for itself.
             "enable_language_identification": not self.language_hints,
-            "enable_speaker_diarization": False,
+            "enable_speaker_diarization": self.enable_speaker_diarization,
             "enable_endpoint_detection": False,
             "audio_format": "pcm_s16le",
             "sample_rate": self.sample_rate,
@@ -111,6 +116,12 @@ class SonioxStreamingSession:
             return
 
         tokens = data.get("tokens", [])
+        if tokens and self.on_tokens:
+            try:
+                self.on_tokens(tokens)
+            except Exception:
+                # A presentation callback must not take down the transcription socket.
+                log.exception("session %d: token callback failed", self.number)
         # start_time is only set by connect(), and a message can arrive without one when
         # the session is driven directly. Losing a latency figure is not worth an exception
         # inside the socket thread.

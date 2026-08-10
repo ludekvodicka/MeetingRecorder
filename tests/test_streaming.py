@@ -73,6 +73,40 @@ def token(text, final=True, status=None):
     return tok
 
 
+class ConfigSocket:
+    def __init__(self):
+        self.messages = []
+
+    def send(self, message):
+        self.messages.append(json.loads(message))
+
+
+class TestStructuredTokens:
+    def test_diarization_is_opt_in(self):
+        socket = ConfigSocket()
+        SonioxStreamingSession(api_key="k")._on_open(socket)
+        assert socket.messages[0]["enable_speaker_diarization"] is False
+
+    def test_diarization_reaches_the_server_config(self):
+        socket = ConfigSocket()
+        session = SonioxStreamingSession(
+            api_key="k", enable_speaker_diarization=True)
+        session._on_open(socket)
+        assert socket.messages[0]["enable_speaker_diarization"] is True
+
+    def test_the_token_callback_receives_speaker_metadata(self):
+        received = []
+        session = SonioxStreamingSession(api_key="k", on_tokens=received.append)
+        deliver(session, [{"text": "Hello.", "is_final": True, "speaker": "2"}])
+        assert received[0][0]["speaker"] == "2"
+
+    def test_a_broken_token_callback_does_not_break_transcription(self):
+        session = SonioxStreamingSession(
+            api_key="k", on_tokens=lambda tokens: 1 / 0)
+        deliver(session, [token("Hello.")])
+        assert session.get_final_text() == "Hello."
+
+
 def deliver(session, tokens, finished=False):
     import json
     session._on_message(None, json.dumps({"tokens": tokens, "finished": finished}))

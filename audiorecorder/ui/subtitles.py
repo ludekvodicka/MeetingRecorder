@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QLabel, QSizePolicy, QTextEdit, QVBoxLayout, QWidget
 TIME_COLOUR = "#6f6f6f"
 ORIGINAL_COLOUR = "#9a9a9a"
 TRANSLATION_COLOUR = "#e8e8e8"
+SPEAKER_COLOUR = "#80cbc4"
 
 
 class SubtitleView(QWidget):
@@ -80,6 +81,24 @@ class SubtitleView(QWidget):
             f'<td>{"<br>".join(rows)}</td></tr></table>'
         )
 
+        cursor = self._settled.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.insertHtml(entry)
+        self._settled.verticalScrollBar().setValue(0)
+
+    def append_speaker_line(self, timestamp, speaker, text):
+        """A settled line with an explicit local or remote speaker label."""
+        if not text:
+            return
+        entry = (
+            '<table cellspacing="0" cellpadding="0" width="100%">'
+            f'<tr><td width="62" valign="top" style="color:{TIME_COLOUR};">'
+            f'{_escape(timestamp)}</td>'
+            f'<td><span style="color:{SPEAKER_COLOUR}; font-weight:600;">'
+            f'{_escape(speaker)}</span><br>'
+            f'<span style="color:{TRANSLATION_COLOUR};">{_escape(text)}</span>'
+            '</td></tr></table>'
+        )
         cursor = self._settled.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.Start)
         cursor.insertHtml(entry)

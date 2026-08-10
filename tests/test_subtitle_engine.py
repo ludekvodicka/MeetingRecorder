@@ -29,6 +29,7 @@ class FakeSession:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.on_pair = kwargs.get("on_pair")
+        self.on_tokens = kwargs.get("on_tokens")
         self.sent = []
         self.connected = False
         self.finished = threading.Event()
@@ -77,6 +78,9 @@ class FakeSession:
         """Speech that needs no translation, which the server tags `none`."""
         self._plain += text
         self.on_pair(self._original, self._translation)
+
+    def speakers_say(self, tokens):
+        self.on_tokens(tokens)
 
 
 @pytest.fixture(autouse=True)
@@ -305,6 +309,12 @@ class TestStopping:
         time.sleep(0.1)
         assert len(FakeSession.instances) == 1
 
+    def test_requesting_stop_is_non_blocking_and_can_be_joined_later(self, started):
+        e = started()
+        e.request_stop()
+        assert e.wait_stopped(timeout=2)
+        assert e._worker is None
+
 
 class TestSourceLanguages:
     """Given the whole world to choose from, the model guessed wrong.
@@ -343,6 +353,82 @@ class TestSourceLanguages:
     def test_the_target_is_independent_of_the_candidates(self):
         engine = SubtitleEngine(api_key="k", translate_to="cs", source_languages=["en", "cs"])
         assert engine.target_language == "cs"
+
+
+class TestLiveSpeakers:
+    def speaker_engine(self, **kwargs):
+        engine = SubtitleEngine(api_key="k", translate_to=None, **kwargs)
+        engine.start()
+        assert wait_for(lambda: FakeSession.instances)
+        return engine
+
+    def test_the_microphone_is_forced_to_me(self):
+        engine = self.speaker_engine(speaker_label="Me")
+        heard = []
+        engine.speaker_line_finalized.connect(
+            lambda timestamp, speaker, text: heard.append((speaker, text)))
+        try:
+            FakeSession.instances[-1].speakers_say([
+                {"text": "Hello.", "is_final": True, "speaker": "7"},
+            ])
+            assert wait_for(lambda: heard)
+            assert heard == [("Me", "Hello.")]
+        finally:
+            engine.stop(timeout=2)
+
+    def test_remote_speakers_keep_the_server_identity(self):
+        engine = self.speaker_engine(
+            speaker_prefix="Remote", enable_speaker_diarization=True)
+        heard = []
+        engine.speaker_line_finalized.connect(
+            lambda timestamp, speaker, text: heard.append((speaker, text)))
+        try:
+            FakeSession.instances[-1].speakers_say([
+                {"text": "One. ", "is_final": True, "speaker": "1"},
+                {"text": "Two.", "is_final": True, "speaker": "2"},
+            ])
+            assert wait_for(lambda: len(heard) == 2)
+            assert heard == [("Remote 1", "One."), ("Remote 2", "Two.")]
+        finally:
+            engine.stop(timeout=2)
+
+    def test_a_speaker_change_settles_a_line_without_punctuation(self):
+        engine = self.speaker_engine(speaker_prefix="Remote")
+        heard = []
+        engine.speaker_line_finalized.connect(
+            lambda timestamp, speaker, text: heard.append((speaker, text)))
+        try:
+            FakeSession.instances[-1].speakers_say([
+                {"text": "Yes", "is_final": True, "speaker": "1"},
+                {"text": "No.", "is_final": True, "speaker": "2"},
+            ])
+            assert wait_for(lambda: len(heard) == 2)
+            assert heard[0] == ("Remote 1", "Yes")
+        finally:
+            engine.stop(timeout=2)
+
+    def test_translation_tokens_are_not_repeated_as_speech(self):
+        engine = self.speaker_engine(speaker_label="Me")
+        try:
+            FakeSession.instances[-1].speakers_say([
+                {"text": "Hello.", "is_final": True,
+                 "speaker": "1", "translation_status": "original"},
+                {"text": "Ahoj.", "is_final": True,
+                 "speaker": "1", "translation_status": "translation"},
+            ])
+            assert wait_for(lambda: engine.speaker_transcript())
+            assert [text for _, _, text in engine.speaker_transcript()] == ["Hello."]
+        finally:
+            engine.stop(timeout=2)
+
+    def test_diarization_is_only_enabled_for_the_remote_engine(self):
+        engine = self.speaker_engine(
+            speaker_prefix="Remote", enable_speaker_diarization=True)
+        try:
+            assert FakeSession.instances[-1].kwargs["enable_speaker_diarization"] is True
+            assert FakeSession.instances[-1].kwargs["on_pair"] is None
+        finally:
+            engine.stop(timeout=2)
 
 
 class TestSpeechAlreadyInTheTargetLanguage:

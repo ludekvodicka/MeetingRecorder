@@ -22,6 +22,7 @@ from audiorecorder.ui.main_window import ACTIVE_TOGGLE_STYLE, MainWindow  # noqa
 class FakeCapture:
     def __init__(self):
         self.tap = None
+        self.mic_tap = None
         self.started = False
         self.stopped = False
         self.error_callback = None
@@ -34,6 +35,9 @@ class FakeCapture:
 
     def set_system_tap(self, callback):
         self.tap = callback
+
+    def set_mic_tap(self, callback):
+        self.mic_tap = callback
 
     def start(self, tmp_dir, system_source, mic_source):
         self.started = True
@@ -78,6 +82,7 @@ class FakeEngine:
         self.kwargs = kwargs
         self.started = False
         self.stopped = 0
+        self.received = []
         FakeEngine.instances.append(self)
 
     target_language = "cs"
@@ -86,10 +91,16 @@ class FakeEngine:
         self.started = True
 
     def feed(self, pcm_bytes):
-        pass
+        self.received.append(pcm_bytes)
 
     def stop(self, timeout=5):
         self.stopped += 1
+
+    def request_stop(self):
+        self.stopped += 1
+
+    def wait_stopped(self, timeout=5):
+        return True
 
     def transcript(self):
         return []
@@ -100,6 +111,7 @@ class FakeEngine:
             pass
 
     line_finalized = _Signal()
+    speaker_line_finalized = _Signal()
     line_updated = _Signal()
     notice = _Signal()
     error_occurred = _Signal()
@@ -131,10 +143,11 @@ def window(app, tmp_path, monkeypatch):
 
     built = []
 
-    def build(rts_translate):
+    def build(rts_translate, live_speakers=False):
         w = MainWindow({
             "output_dir": str(tmp_path),
             "rts_translate": rts_translate,
+            "live_speakers": live_speakers,
             "language": "en",
             "translation_target": "cs",
         })
@@ -250,6 +263,67 @@ class TestWhileOn:
         w._start_recording()
 
         assert FakeEngine.instances[0].kwargs["translate_to"] == "cs"
+
+
+class TestLiveSpeakerToggle:
+    def test_off_opens_no_extra_session(self, window):
+        w = window(rts_translate=False, live_speakers=False)
+        w._start_recording()
+        assert FakeEngine.instances == []
+        assert w.captures[0].mic_tap is None
+
+    def test_on_opens_local_and_remote_sessions(self, window):
+        w = window(rts_translate=False, live_speakers=True)
+        w._start_recording()
+        assert len(FakeEngine.instances) == 2
+        assert {engine.kwargs.get("speaker_label") for engine in FakeEngine.instances} == {
+            None, "Me"}
+        assert w.captures[0].tap is not None
+        assert w.captures[0].mic_tap is not None
+
+    def test_remote_session_uses_diarization(self, window):
+        w = window(rts_translate=False, live_speakers=True)
+        w._start_recording()
+        remote = next(engine for engine in FakeEngine.instances
+                      if engine.kwargs.get("speaker_prefix") == "Remote")
+        assert remote.kwargs["enable_speaker_diarization"] is True
+
+    def test_microphone_only_recording_opens_only_the_me_session(
+            self, window, monkeypatch):
+        monkeypatch.setattr(FakeCapture, "active_system_source", None)
+        w = window(rts_translate=False, live_speakers=True)
+        w._start_recording()
+        assert len(FakeEngine.instances) == 1
+        assert FakeEngine.instances[0].kwargs["speaker_label"] == "Me"
+        assert w.captures[0].tap is None
+        assert w.captures[0].mic_tap is not None
+
+    def test_switching_off_closes_both_sessions_and_taps(self, window):
+        w = window(rts_translate=False, live_speakers=True)
+        w._start_recording()
+        w._btn_live_speakers.setChecked(False)
+        w._toggle_live_speakers()
+        assert all(engine.stopped == 1 for engine in FakeEngine.instances)
+        assert w.captures[0].tap is None
+        assert w.captures[0].mic_tap is None
+
+    def test_translation_and_speakers_share_the_system_tap(self, window):
+        w = window(rts_translate=True, live_speakers=True)
+        w._start_recording()
+        w.captures[0].tap(b"audio")
+        assert len(FakeEngine.instances) == 3
+        translation = next(engine for engine in FakeEngine.instances
+                           if engine.kwargs.get("translate_to") == "cs")
+        remote = next(engine for engine in FakeEngine.instances
+                      if engine.kwargs.get("speaker_prefix") == "Remote")
+        assert translation.received == [b"audio"]
+        assert remote.received == [b"audio"]
+
+    def test_stopping_the_recording_closes_both_speaker_sessions(self, window):
+        w = window(rts_translate=False, live_speakers=True)
+        w._start_recording()
+        w._stop_recording()
+        assert all(engine.stopped == 1 for engine in FakeEngine.instances)
 
 
 class TestTheButtonShowsItIsOn:

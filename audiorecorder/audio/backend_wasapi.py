@@ -130,6 +130,7 @@ class WasapiBackend(CaptureBackend):
             self._mic_path, mode="w", samplerate=mic_rate,
             channels=1, format="WAV", subtype="FLOAT",
         )
+        self._prepare_mic_tap(mic_rate)
 
         try:
             if record_system:
@@ -177,6 +178,7 @@ class WasapiBackend(CaptureBackend):
             input_device_index=mic_info["index"], frames_per_buffer=CHUNK_SIZE,
             stream_callback=self._mic_callback,
         )
+        self._prepare_mic_tap(native_rate)
 
     def _discard_partial_start(self):
         for stream in (self._system_stream, self._mic_stream):
@@ -207,6 +209,7 @@ class WasapiBackend(CaptureBackend):
                 self._mic_writer.write(data)
         if self._mic_level_callback:
             self._mic_level_callback(rms_level(data))
+        self._feed_mic_tap(data)
         return (None, pyaudio.paContinue)
 
     def stop(self):

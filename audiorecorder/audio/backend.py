@@ -61,7 +61,9 @@ class CaptureBackend(ABC):
         self._active_system_source = None
         self._active_mic_source = None
         self._system_tap = None
+        self._mic_tap = None
         self._downsampler = None
+        self._mic_downsampler = None
 
     @abstractmethod
     def list_system_sources(self):
@@ -113,9 +115,22 @@ class CaptureBackend(ABC):
         """
         self._system_tap = callback
 
+    def set_mic_tap(self, callback):
+        """Receive a copy of the microphone as mono 16 kHz int16 bytes, None to stop.
+
+        The same audio-thread constraints as :meth:`set_system_tap` apply. The microphone
+        remains an independent tap so a live transcript can label it as the local user
+        without asking diarization to rediscover information the recorder already knows.
+        """
+        self._mic_tap = callback
+
     def _prepare_tap(self, source_rate):
         """Backends call this when the system stream opens, with its real sample rate."""
         self._downsampler = Downsampler(source_rate, SUBTITLE_RATE)
+
+    def _prepare_mic_tap(self, source_rate):
+        """Backends call this when the microphone opens, with its real sample rate."""
+        self._mic_downsampler = Downsampler(source_rate, SUBTITLE_RATE)
 
     def _feed_tap(self, block):
         """Backends call this from the audio callback, after the recording is written.
@@ -123,15 +138,24 @@ class CaptureBackend(ABC):
         Never raises: a subtitle fault is not worth a lost call, so the tap switches itself
         off and the recording carries on without it.
         """
-        if self._system_tap is None or self._downsampler is None:
+        self._feed_audio_tap(block, "_system_tap", "_downsampler", "system")
+
+    def _feed_mic_tap(self, block):
+        """Feed the local-speaker tap without risking the recording callback."""
+        self._feed_audio_tap(block, "_mic_tap", "_mic_downsampler", "microphone")
+
+    def _feed_audio_tap(self, block, callback_attr, downsampler_attr, label):
+        callback = getattr(self, callback_attr)
+        downsampler = getattr(self, downsampler_attr)
+        if callback is None or downsampler is None:
             return
         try:
-            chunk = self._downsampler.feed(block)
+            chunk = downsampler.feed(block)
             if chunk:
-                self._system_tap(chunk)
+                callback(chunk)
         except Exception:
-            log.exception("the subtitle tap failed, dropping it for this recording")
-            self._system_tap = None
+            log.exception("the %s transcript tap failed, dropping it for this recording", label)
+            setattr(self, callback_attr, None)
 
     @property
     def is_recording(self):

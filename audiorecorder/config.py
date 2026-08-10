@@ -39,6 +39,9 @@ DEFAULTS = {
     # Live translated subtitles during a recording. Off by default: it bills realtime
     # minutes for the whole call, on top of the transcription that follows it.
     "rts_translate": False,
+    # Live speaker labels open two additional realtime streams (system + microphone), so
+    # they are explicit opt-in just like translated subtitles.
+    "live_speakers": False,
 }
 
 

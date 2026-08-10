@@ -70,6 +70,13 @@ class TestDefaults:
         """They bill realtime minutes for a whole call, so nobody gets them by accident."""
         assert config.DEFAULTS["rts_translate"] is False
 
+    def test_live_speakers_are_off_by_default(self):
+        assert config.DEFAULTS["live_speakers"] is False
+
     def test_the_subtitle_toggle_survives_a_restart(self, isolated_config):
         config.save_config({**config.DEFAULTS, "rts_translate": True})
         assert config.load_config()["rts_translate"] is True
+
+    def test_the_speaker_toggle_survives_a_restart(self, isolated_config):
+        config.save_config({**config.DEFAULTS, "live_speakers": True})
+        assert config.load_config()["live_speakers"] is True

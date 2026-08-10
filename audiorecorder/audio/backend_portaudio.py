@@ -107,6 +107,7 @@ class PortAudioBackend(CaptureBackend):
             device=mic_index, channels=1, samplerate=mic_rate, dtype="float32",
             blocksize=BLOCK_SIZE, callback=self._mic_callback,
         )
+        self._prepare_mic_tap(mic_rate)
 
     def _start_open_streams(self):
         if self._system_stream is not None:
@@ -189,6 +190,7 @@ class PortAudioBackend(CaptureBackend):
                 self._mic_writer.write(data)
         if self._mic_level_callback:
             self._mic_level_callback(rms_level(data))
+        self._feed_mic_tap(data)
 
     def stop(self):
         if not self._is_recording:
