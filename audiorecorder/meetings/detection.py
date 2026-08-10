@@ -86,6 +86,18 @@ class NullMeetingDetector:
         return []
 
 
+class CombinedMeetingDetector:
+    def __init__(self, detectors):
+        self._detectors = tuple(detectors)
+
+    def scan(self):
+        combined = {}
+        for detector in self._detectors:
+            for candidate in detector.scan():
+                combined[candidate.key] = candidate
+        return list(combined.values())
+
+
 class MacOSMeetingDetector:
     def __init__(self):
         self._available = True

@@ -25,7 +25,9 @@ from audiorecorder.audio.encoder import mix_and_encode
 from audiorecorder.config import DEFAULT_SUMMARY_PROMPT, save_config
 from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
+from audiorecorder.meetings.browser_bridge import BrowserMeetingBridge
 from audiorecorder.meetings.detection import (
+    CombinedMeetingDetector,
     MeetingPromptPolicy,
     create_meeting_detector,
 )
@@ -153,7 +155,9 @@ class MainWindow(QMainWindow):
         self._observed_remote_speakers = set()
         self._speaker_segments = []
         self._pending_sidecars = {}
-        self._meeting_detector = create_meeting_detector()
+        self._browser_meeting_bridge = BrowserMeetingBridge()
+        self._meeting_detector = CombinedMeetingDetector([
+            create_meeting_detector(), self._browser_meeting_bridge])
         self._meeting_prompt_policy = MeetingPromptPolicy()
         self._meeting_prompt = None
         self._overlay = OverlayWidget()
@@ -190,9 +194,15 @@ class MainWindow(QMainWindow):
 
     def _sync_meeting_detection(self):
         if self.config.get("meeting_detection", True):
+            if not self._browser_meeting_bridge.start():
+                self._status_bar.showMessage(
+                    "Browser meeting detection unavailable: localhost port 8765 is busy",
+                    8000,
+                )
             self._meeting_timer.start()
         else:
             self._meeting_timer.stop()
+            self._browser_meeting_bridge.stop()
             if self._meeting_prompt is not None:
                 self._meeting_prompt.close()
 
@@ -1109,6 +1119,7 @@ class MainWindow(QMainWindow):
         if self._dictation_active:
             self._stop_dictation()
         self._meeting_timer.stop()
+        self._browser_meeting_bridge.stop()
         # The filter is installed on the whole application, so it goes on being called
         # after this window is gone. Qt then calls it on a half-destroyed object and
         # aborts the process.

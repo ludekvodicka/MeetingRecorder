@@ -17,6 +17,7 @@ class MeetingPrompt(QDialog):
         message = QLabel(
             f"{candidate.app_name} appears to have an active meeting:\n\n"
             f"{candidate.title}\n\nStart Meeting Recorder now?")
+        message.setTextFormat(Qt.TextFormat.PlainText)
         message.setWordWrap(True)
         layout.addWidget(message)
 

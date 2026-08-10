@@ -155,6 +155,7 @@ def window(app, tmp_path, monkeypatch):
             "output_dir": str(tmp_path),
             "rts_translate": rts_translate,
             "live_speakers": live_speakers,
+            "meeting_detection": False,
             "language": "en",
             "translation_target": "cs",
         })
