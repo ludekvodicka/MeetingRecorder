@@ -73,6 +73,9 @@ class TestDefaults:
     def test_live_speakers_are_off_by_default(self):
         assert config.DEFAULTS["live_speakers"] is False
 
+    def test_meeting_detection_is_safe_and_on_by_default(self):
+        assert config.DEFAULTS["meeting_detection"] is True
+
     def test_the_subtitle_toggle_survives_a_restart(self, isolated_config):
         config.save_config({**config.DEFAULTS, "rts_translate": True})
         assert config.load_config()["rts_translate"] is True

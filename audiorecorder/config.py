@@ -42,6 +42,9 @@ DEFAULTS = {
     # Live speaker labels open two additional realtime streams (system + microphone), so
     # they are explicit opt-in just like translated subtitles.
     "live_speakers": False,
+    # A conservative, local-only signal offers the Record button when a meeting window is
+    # stable. It never records automatically and is safe to enable by default.
+    "meeting_detection": True,
 }
 
 

@@ -15,6 +15,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from audiorecorder.meetings.detection import (  # noqa: E402
+    MeetingCandidate,
+    MeetingPromptPolicy,
+)
 from audiorecorder.ui import main_window as mw  # noqa: E402
 from audiorecorder.ui.main_window import ACTIVE_TOGGLE_STYLE, MainWindow  # noqa: E402
 
@@ -360,6 +364,44 @@ class TestLiveSpeakerToggle:
         assert not (tmp_path / "call.speakers.md").exists()
         w._on_encode_finished(recording)
         assert (tmp_path / "call.speakers.md").exists()
+
+
+class TestMeetingPopupIntegration:
+    candidate = MeetingCandidate("1:2", "Zoom", "Project sync - Zoom Meeting")
+
+    class Detector:
+        def __init__(self, candidate):
+            self.candidate = candidate
+
+        def scan(self):
+            return [self.candidate]
+
+    def test_a_stable_signal_shows_the_recording_prompt(self, window):
+        w = window(rts_translate=False)
+        w._meeting_detector = self.Detector(self.candidate)
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=2)
+        w._poll_for_meeting()
+        assert w._meeting_prompt is None
+        w._poll_for_meeting()
+        assert w._meeting_prompt is not None
+        w._meeting_prompt.reject()
+
+    def test_accepting_the_prompt_starts_the_normal_recorder(self, window):
+        w = window(rts_translate=False)
+        w._meeting_detector = self.Detector(self.candidate)
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        w._poll_for_meeting()
+        w._meeting_prompt.accept()
+        assert w._is_recording
+        assert w.captures[-1].started
+
+    def test_an_active_recording_suppresses_the_popup(self, window):
+        w = window(rts_translate=False)
+        w._start_recording()
+        w._meeting_detector = self.Detector(self.candidate)
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        w._poll_for_meeting()
+        assert w._meeting_prompt is None
 
 
 class TestTheButtonShowsItIsOn:

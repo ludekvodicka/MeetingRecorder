@@ -25,6 +25,10 @@ from audiorecorder.audio.encoder import mix_and_encode
 from audiorecorder.config import DEFAULT_SUMMARY_PROMPT, save_config
 from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
+from audiorecorder.meetings.detection import (
+    MeetingPromptPolicy,
+    create_meeting_detector,
+)
 from audiorecorder.recordings.manager import RecordingManager, sidecars
 from audiorecorder.subtitles.document import write_live_transcript
 from audiorecorder.subtitles.engine import SubtitleEngine
@@ -37,6 +41,7 @@ from audiorecorder.transcription.markdown import language_name
 from audiorecorder.transcription.soniox import SonioxWorker
 from audiorecorder.ui.audio_player import AudioPlayerWidget
 from audiorecorder.ui.level_bars import DualLevelBars
+from audiorecorder.ui.meeting_prompt import MeetingPrompt
 from audiorecorder.ui.overlay import OverlayWidget
 from audiorecorder.ui.recording_list import RecordingListWidget
 from audiorecorder.ui.settings_dialog import SettingsDialog
@@ -148,6 +153,9 @@ class MainWindow(QMainWindow):
         self._observed_remote_speakers = set()
         self._speaker_segments = []
         self._pending_sidecars = {}
+        self._meeting_detector = create_meeting_detector()
+        self._meeting_prompt_policy = MeetingPromptPolicy()
+        self._meeting_prompt = None
         self._overlay = OverlayWidget()
         self._hotkey_filter = DictationHotkeyFilter(lambda: self._dictation_active, self)
         QApplication.instance().installEventFilter(self._hotkey_filter)
@@ -162,6 +170,10 @@ class MainWindow(QMainWindow):
         self._capture_error_signal.connect(self._on_capture_error)
         self._update_available_signal.connect(self._on_update_available)
         self._start_update_check()
+        self._meeting_timer = QTimer(self)
+        self._meeting_timer.setInterval(5000)
+        self._meeting_timer.timeout.connect(self._poll_for_meeting)
+        self._sync_meeting_detection()
 
     def _start_update_check(self):
         """Ask GitHub for a newer release, off the UI thread, failing silently."""
@@ -175,6 +187,44 @@ class MainWindow(QMainWindow):
     def _on_update_available(self, latest):
         self._status_bar.showMessage(
             f"Version {latest} is available at {update_check.RELEASES_PAGE}", 15000)
+
+    def _sync_meeting_detection(self):
+        if self.config.get("meeting_detection", True):
+            self._meeting_timer.start()
+        else:
+            self._meeting_timer.stop()
+            if self._meeting_prompt is not None:
+                self._meeting_prompt.close()
+
+    def _poll_for_meeting(self):
+        candidates = self._meeting_detector.scan()
+        candidate = self._meeting_prompt_policy.next_prompt(
+            candidates,
+            blocked=self._is_recording or self._meeting_prompt is not None,
+        )
+        if candidate is None:
+            return
+        prompt = MeetingPrompt(candidate, self)
+        self._meeting_prompt = prompt
+        prompt.accepted.connect(self._start_detected_meeting)
+        prompt.finished.connect(
+            lambda result, shown=prompt: self._clear_meeting_prompt(shown))
+        prompt.show()
+        prompt.raise_()
+        prompt.activateWindow()
+        QApplication.alert(prompt, 0)
+
+    def _clear_meeting_prompt(self, prompt):
+        if self._meeting_prompt is prompt:
+            self._meeting_prompt = None
+        prompt.deleteLater()
+
+    def _start_detected_meeting(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if not self._is_recording:
+            self._start_recording()
 
     def _build_ui(self):
         central = QWidget()
@@ -1037,6 +1087,7 @@ class MainWindow(QMainWindow):
             save_config(self.config)
             os.makedirs(self.config["output_dir"], exist_ok=True)
             self._refresh_list()
+            self._sync_meeting_detection()
             self._status_bar.showMessage("Settings saved", 3000)
 
     def closeEvent(self, event):
@@ -1057,6 +1108,7 @@ class MainWindow(QMainWindow):
             return
         if self._dictation_active:
             self._stop_dictation()
+        self._meeting_timer.stop()
         # The filter is installed on the whole application, so it goes on being called
         # after this window is gone. Qt then calls it on a half-destroyed object and
         # aborts the process.

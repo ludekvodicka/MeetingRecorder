@@ -41,6 +41,12 @@ class SettingsDialog(QDialog):
         dir_row.addWidget(btn_browse)
         general_layout.addRow("Output directory:", dir_row)
 
+        self._meeting_detection = QCheckBox(
+            "Show a recording prompt when a meeting is detected")
+        self._meeting_detection.setChecked(
+            self.config.get("meeting_detection", True))
+        general_layout.addRow("", self._meeting_detection)
+
         layout.addWidget(general_group)
 
         # --- Audio ---
@@ -157,6 +163,7 @@ class SettingsDialog(QDialog):
 
     def _save_and_close(self):
         self.config["output_dir"] = self._dir_edit.text()
+        self.config["meeting_detection"] = self._meeting_detection.isChecked()
 
         lang_map = {0: "cs", 1: "en", 2: "auto"}
         self.config["language"] = lang_map.get(self._lang_combo.currentIndex(), "en")
