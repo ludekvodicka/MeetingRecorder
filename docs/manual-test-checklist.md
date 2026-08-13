@@ -94,8 +94,9 @@ and say in the release notes what was not exercised.
       M4A succeeds, contain the final names for earlier lines too, and follow rename/delete
 - [ ] Open a Teams or Zoom meeting window: one prompt appears after the stable detection;
       dismissing it does not produce another prompt until that meeting window disappears
-- [ ] Copy and load the DMG's browser companion in Chrome/Edge, open a Google Meet code URL,
-      and confirm the same prompt; moving to a non-meeting page removes the signal
+- [ ] Reveal the app-bundled browser companion from Settings and load it in Brave/Chrome/Edge;
+      confirm the status bar says Browser: connected, open a Google Meet code URL, and confirm
+      the same prompt; moving to a non-meeting page removes the signal
 - [ ] Enable Calendar detection, grant Calendar access, and confirm an imminent attended or
       linked event prompts while a personal reminder and an all-day event do not
 - [ ] Enable automatic recording, open a detected app/browser meeting, and cancel the visible

@@ -44,6 +44,10 @@ MEETING = {
 
 
 class TestAuthenticatedLoopbackEndpoint:
+    def test_presence_heartbeat_reports_a_connected_companion(self, bridge):
+        assert post(bridge, {"type": "companion-presence"}) == 204
+        assert bridge.companion_status().connected
+
     def test_an_extension_heartbeat_becomes_a_candidate(self, bridge):
         assert post(bridge, MEETING) == 204
         assert bridge.scan() == [MeetingCandidate(
@@ -85,6 +89,23 @@ def test_stale_heartbeats_expire():
     bridge.update(MEETING)
     now[0] = 111.0
     assert bridge.scan() == []
+
+
+def test_stale_companion_presence_expires():
+    now = [100.0]
+    bridge = BrowserMeetingBridge(heartbeat_ttl=10, clock=lambda: now[0])
+    bridge._thread = type("Thread", (), {"is_alive": lambda self: True})()
+    bridge.update({"type": "companion-presence"})
+    assert bridge.companion_status().connected
+    now[0] = 111.0
+    assert not bridge.companion_status().connected
+
+
+def test_status_reports_listener_failure():
+    bridge = BrowserMeetingBridge()
+    bridge.last_error = "port is busy"
+    assert bridge.companion_status().error == "port is busy"
+    assert not bridge.companion_status().listening
 
 
 def test_text_is_collapsed_and_bounded():

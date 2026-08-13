@@ -4,6 +4,10 @@ const BRIDGE_URL = "http://127.0.0.1:8765/v1/meeting";
 const HEADER_VALUE = "browser-extension-v1";
 const meetings = new Map();
 
+function reportPresence() {
+  return report({type: "companion-presence"});
+}
+
 async function report(meeting) {
   try {
     await fetch(BRIDGE_URL, {
@@ -45,10 +49,12 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.alarms.create("meeting-heartbeats", {periodInMinutes: 0.5});
+reportPresence();
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== "meeting-heartbeats") {
     return;
   }
+  reportPresence();
   for (const meeting of meetings.values()) {
     report(meeting);
   }

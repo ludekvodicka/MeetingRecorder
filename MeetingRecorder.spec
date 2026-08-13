@@ -14,10 +14,14 @@ sys.path.insert(0, SPECPATH)
 from audiorecorder.version import __version__
 
 ASSETS = Path(SPECPATH) / "audiorecorder" / "assets"
+BROWSER_EXTENSION = Path(SPECPATH) / "browser-extension"
 MACOS_ENTITLEMENTS = Path(SPECPATH) / "packaging" / "macos.entitlements"
 MACOS_CODESIGN_IDENTITY = os.environ.get("MACOS_CODESIGN_IDENTITY")
 
-datas = [(str(ASSETS), "audiorecorder/assets")]
+datas = [
+    (str(ASSETS), "audiorecorder/assets"),
+    (str(BROWSER_EXTENSION), "browser-extension"),
+]
 binaries = []
 # WASAPI loopback is a Windows-only dependency, and PyInstaller must not look for it
 # anywhere else.

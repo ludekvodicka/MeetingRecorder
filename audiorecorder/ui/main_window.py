@@ -257,8 +257,23 @@ class MainWindow(QMainWindow):
             self._calendar_meeting_detector.stop()
             if self._meeting_prompt is not None:
                 self._meeting_prompt.close()
+        self._update_browser_status()
+
+    def _update_browser_status(self):
+        if not self.config.get("meeting_detection", True):
+            text = "Browser: detection off"
+        else:
+            status = self._browser_meeting_bridge.companion_status()
+            if status.connected:
+                text = "Browser: connected"
+            elif status.listening:
+                text = "Browser: not connected"
+            else:
+                text = "Browser: bridge unavailable"
+        self._browser_status_label.setText(text)
 
     def _poll_for_meeting(self):
+        self._update_browser_status()
         calendar_notice = self._calendar_meeting_detector.pop_notice()
         if calendar_notice:
             self._status_bar.showMessage(calendar_notice, 8000)
@@ -442,6 +457,10 @@ class MainWindow(QMainWindow):
         # --- Status bar ---
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
+        self._browser_status_label = QLabel()
+        self._browser_status_label.setToolTip(
+            "The browser companion sends a local heartbeat when it is installed and enabled.")
+        self._status_bar.addPermanentWidget(self._browser_status_label)
         # Permanent (right-aligned) version label, not cleared by transient messages.
         version_label = QLabel(f"v{__version__}")
         version_label.setStyleSheet("color: #888; padding: 0 6px;")
@@ -1168,7 +1187,11 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage(f"Added {added} file(s)", 5000)
 
     def _open_settings(self):
-        dialog = SettingsDialog(self.config, self)
+        dialog = SettingsDialog(
+            self.config,
+            self,
+            browser_bridge=self._browser_meeting_bridge,
+        )
         if dialog.exec():
             self.config = dialog.get_config()
             save_config(self.config)

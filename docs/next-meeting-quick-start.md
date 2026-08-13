@@ -33,12 +33,15 @@
 
 ## 3. Optional browser meeting detection
 
-1. From the DMG, copy **Meeting Recorder Browser Extension** to a permanent location such as
-   `/Applications/Meeting Recorder Browser Extension`. Do not load it directly from the DMG,
-   because the folder must remain available after the DMG is ejected.
-2. In Chrome open `chrome://extensions`; in Edge open `edge://extensions`.
-3. Enable **Developer mode**, choose **Load unpacked**, and select the copied folder.
-4. The extension can see only supported Meet/Zoom/Teams meeting pages and can contact only
+1. In Meeting Recorder, open **Settings** and choose **Reveal Companion Folder**. This opens
+   the permanent copy bundled inside the installed app; do not select a folder from the DMG.
+2. In Brave open `brave://extensions`; in Chrome use `chrome://extensions`; in Edge use
+   `edge://extensions`.
+3. Enable **Developer mode**, choose **Load unpacked**, and select the revealed
+   `browser-extension` folder.
+4. Confirm the app status bar changes from **Browser: not connected** to
+   **Browser: connected** within about 30 seconds.
+5. The extension can see only supported Meet/Zoom/Teams meeting pages and can contact only
    `127.0.0.1`. It has no history, tabs, or tab-capture permission.
 
 ## 4. Before joining
@@ -69,4 +72,5 @@
 
 If no prompt appears, recording still works manually. Check that meeting detection is enabled,
 Meeting Recorder is still running, and—only for browser calls—the unpacked extension remains
-enabled and its folder has not moved.
+enabled. The app status bar must say **Browser: connected**; if it does not, open Settings and
+reveal/load the bundled companion again.

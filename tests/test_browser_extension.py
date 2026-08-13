@@ -59,3 +59,9 @@ def test_javascript_parses_when_node_is_available():
             capture_output=True,
             text=True,
         )
+
+
+def test_background_reports_presence_without_an_active_meeting():
+    script = (EXTENSION / "background.js").read_text(encoding="utf-8")
+    assert 'type: "companion-presence"' in script
+    assert "reportPresence();" in script

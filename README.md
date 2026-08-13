@@ -62,7 +62,7 @@ Live labels are immediate aids; the later batch transcription remains more accur
 feature is off by default and adds up to two paid Soniox realtime streams.
 
 **Offers recording when a meeting appears.** On macOS, stable Teams, Zoom, Webex, and Slack
-Huddle windows produce a non-modal recording prompt. An optional least-privilege Chrome/Edge
+Huddle windows produce a non-modal recording prompt. An optional least-privilege Brave/Chrome/Edge
 companion covers Google Meet, Zoom Web, and Teams Web. It can see only those meeting pages,
 has no history/tab-capture permission, and reports to `127.0.0.1` only. macOS Calendar is a
 separate opt-in signal for imminent events with attendees or a recognized conference link.
@@ -98,7 +98,7 @@ please report what you find.
 | Live subtitles (RTS Translate) | yes | yes on macOS 13+ | only with a monitor source |
 | Live speaker labels | yes | yes on macOS 13+ | only with a monitor source |
 | Native meeting popup | no | Teams, Zoom, Webex, Slack Huddles | no |
-| Browser meeting popup | optional Chrome/Edge companion | optional Chrome/Edge companion | optional Chrome/Edge companion |
+| Browser meeting popup | optional Brave/Chrome/Edge companion | optional Brave/Chrome/Edge companion | optional Brave/Chrome/Edge companion |
 | Calendar meeting signal | no | opt-in through EventKit | no |
 | Dictation hotkey | yes | yes, needs Accessibility permission | X11 only, not on Wayland |
 | Paste after dictation | yes | yes, sends Cmd+V | X11, and needs `xclip` or `xsel` |
@@ -144,8 +144,9 @@ certutil -hashfile Meeting-Recorder-0.2.0-x64.exe SHA256    # Windows Command Pr
 - **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
   On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
   `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across. The DMG also
-  contains the optional unpacked browser companion and a next-meeting quick start. Copy the
-  companion folder to a permanent location before loading it in Chrome or Edge.
+  contains the optional unpacked browser companion and a next-meeting quick start. The app
+  keeps its own permanent companion copy: open **Settings > Reveal Companion Folder** before
+  loading it in Brave, Chrome, or Edge.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 

@@ -1,6 +1,7 @@
 import sys
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -9,6 +10,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -18,12 +20,17 @@ from PyQt6.QtWidgets import (
 
 from audiorecorder import macos_login, secrets
 from audiorecorder.audio.backend import SYSTEM_SOURCE_NONE, create_backend
+from audiorecorder.meetings.browser_companion import (
+    companion_available,
+    companion_directory,
+)
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config, parent=None):
+    def __init__(self, config, parent=None, browser_bridge=None):
         super().__init__(parent)
         self.config = dict(config)
+        self._browser_bridge = browser_bridge
         self.setWindowTitle("Settings")
         self.setMinimumWidth(450)
         self._build_ui()
@@ -82,6 +89,23 @@ class SettingsDialog(QDialog):
         general_layout.addRow("", self._launch_at_login)
 
         layout.addWidget(general_group)
+
+        # --- Browser companion ---
+        browser_group = QGroupBox("Browser Meeting Detection")
+        browser_layout = QFormLayout(browser_group)
+        self._browser_status = QLabel()
+        self._refresh_browser_status()
+        browser_layout.addRow("Status:", self._browser_status)
+        reveal_companion = QPushButton("Reveal Companion Folder…")
+        reveal_companion.setEnabled(companion_available())
+        reveal_companion.clicked.connect(self._reveal_browser_companion)
+        browser_layout.addRow("", reveal_companion)
+        browser_help = QLabel(
+            "In Brave, open brave://extensions, enable Developer mode, choose Load unpacked, "
+            "and select the revealed folder.")
+        browser_help.setWordWrap(True)
+        browser_layout.addRow("", browser_help)
+        layout.addWidget(browser_group)
 
         # --- Audio ---
         audio_group = QGroupBox("Audio Devices")
@@ -164,6 +188,33 @@ class SettingsDialog(QDialog):
         d = QFileDialog.getExistingDirectory(self, "Select output directory", self._dir_edit.text())
         if d:
             self._dir_edit.setText(d)
+
+    def _refresh_browser_status(self):
+        if self._browser_bridge is None:
+            message = "Available after Meeting Recorder starts"
+        else:
+            status = self._browser_bridge.companion_status()
+            if status.connected:
+                message = "Connected — Brave/Chrome companion heartbeat received"
+            elif status.listening:
+                message = "Not connected — install or enable the companion"
+            else:
+                message = f"Unavailable — {status.error or 'local bridge is not running'}"
+        self._browser_status.setText(message)
+
+    def _reveal_browser_companion(self):
+        directory = companion_directory()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
+        QMessageBox.information(
+            self,
+            "Install Browser Companion",
+            "In Brave:\n\n"
+            "1. Open brave://extensions\n"
+            "2. Enable Developer mode\n"
+            "3. Choose Load unpacked\n"
+            f"4. Select this folder:\n{directory}\n\n"
+            "Keep Meeting Recorder running. Settings will then show Connected.",
+        )
 
     def _populate_devices(self):
         try:

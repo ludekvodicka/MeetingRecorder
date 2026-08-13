@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from audiorecorder.meetings.detection import MeetingCandidate
@@ -20,6 +21,13 @@ HEARTBEAT_TTL_SECONDS = 75
 _ALLOWED_ORIGIN_PREFIXES = ("chrome-extension://", "moz-extension://")
 
 
+@dataclass(frozen=True)
+class BrowserCompanionStatus:
+    listening: bool
+    connected: bool
+    error: str | None = None
+
+
 class BrowserMeetingBridge:
     def __init__(self, host=BRIDGE_HOST, port=BRIDGE_PORT,
                  heartbeat_ttl=HEARTBEAT_TTL_SECONDS, clock=time.monotonic):
@@ -29,6 +37,7 @@ class BrowserMeetingBridge:
         self._clock = clock
         self._lock = threading.Lock()
         self._meetings = {}
+        self._companion_seen_at = None
         self._server = None
         self._thread = None
         self.last_error = None
@@ -69,8 +78,13 @@ class BrowserMeetingBridge:
             thread.join(timeout=1)
         with self._lock:
             self._meetings.clear()
+            self._companion_seen_at = None
 
     def update(self, payload):
+        if payload.get("type") == "companion-presence":
+            with self._lock:
+                self._companion_seen_at = self._clock()
+            return
         key = _clean(payload.get("key"), 300)
         if not key:
             raise ValueError("meeting key is required")
@@ -96,6 +110,18 @@ class BrowserMeetingBridge:
             for key in expired:
                 self._meetings.pop(key, None)
             return [candidate for candidate, _ in self._meetings.values()]
+
+    def companion_status(self):
+        thread = self._thread
+        listening = thread is not None and thread.is_alive()
+        now = self._clock()
+        with self._lock:
+            connected = (
+                listening
+                and self._companion_seen_at is not None
+                and now - self._companion_seen_at <= self._heartbeat_ttl
+            )
+        return BrowserCompanionStatus(listening, connected, self.last_error)
 
 
 class _BridgeHandler(BaseHTTPRequestHandler):
