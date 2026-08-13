@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from audiorecorder import secrets
+from audiorecorder import macos_login, secrets
 from audiorecorder.audio.backend import SYSTEM_SOURCE_NONE, create_backend
 
 
@@ -68,6 +68,18 @@ class SettingsDialog(QDialog):
             "Off by default. A visible countdown always allows cancellation. "
             "Calendar-only signals never start recording automatically.")
         general_layout.addRow("", self._automatic_recording)
+
+        self._launch_at_login = QCheckBox(
+            "Launch at login and keep meeting detection available")
+        self._launch_at_login.setVisible(sys.platform == "darwin")
+        self._launch_at_login.setChecked(self.config.get("launch_at_login", False))
+        if sys.platform == "darwin":
+            try:
+                self._launch_at_login.setChecked(macos_login.login_item_registered())
+            except macos_login.LoginItemUnavailable as err:
+                self._launch_at_login.setEnabled(False)
+                self._launch_at_login.setToolTip(str(err))
+        general_layout.addRow("", self._launch_at_login)
 
         layout.addWidget(general_group)
 
@@ -184,10 +196,19 @@ class SettingsDialog(QDialog):
             combo.setCurrentIndex(idx)
 
     def _save_and_close(self):
+        launch_at_login = self._launch_at_login.isChecked()
+        if sys.platform == "darwin" and self._launch_at_login.isEnabled():
+            try:
+                if launch_at_login != macos_login.login_item_registered():
+                    macos_login.set_login_item_enabled(launch_at_login)
+            except (macos_login.LoginItemUnavailable, RuntimeError) as err:
+                QMessageBox.warning(self, "Launch at login", str(err))
+                return
         self.config["output_dir"] = self._dir_edit.text()
         self.config["meeting_detection"] = self._meeting_detection.isChecked()
         self.config["calendar_detection"] = self._calendar_detection.isChecked()
         self.config["automatic_recording"] = self._automatic_recording.isChecked()
+        self.config["launch_at_login"] = launch_at_login
 
         lang_map = {0: "cs", 1: "en", 2: "auto"}
         self.config["language"] = lang_map.get(self._lang_combo.currentIndex(), "en")

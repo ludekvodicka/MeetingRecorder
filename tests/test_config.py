@@ -82,6 +82,9 @@ class TestDefaults:
     def test_automatic_recording_requires_an_explicit_opt_in(self):
         assert config.DEFAULTS["automatic_recording"] is False
 
+    def test_launch_at_login_requires_an_explicit_opt_in(self):
+        assert config.DEFAULTS["launch_at_login"] is False
+
     def test_the_subtitle_toggle_survives_a_restart(self, isolated_config):
         config.save_config({**config.DEFAULTS, "rts_translate": True})
         assert config.load_config()["rts_translate"] is True

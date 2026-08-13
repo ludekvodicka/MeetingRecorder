@@ -23,9 +23,11 @@
    the wrong devices.
 3. Add the Soniox API key if you want transcription, live translation, or live speakers.
 4. Keep **Show a recording prompt when a meeting is detected** enabled.
-5. Optionally enable **Use macOS Calendar**. macOS requests Calendar access; this is used only
+5. Enable **Launch at login and keep meeting detection available** if prompts should work after
+   every Mac login. macOS may also show this under **General > Login Items**.
+6. Optionally enable **Use macOS Calendar**. macOS requests Calendar access; this is used only
    to find imminent events with attendees or a supported conference link.
-6. Leave automatic recording off for the first meeting. If you later enable it, only an
+7. Leave automatic recording off for the first meeting. If you later enable it, only an
    actual app/browser meeting signal qualifies and a visible 10-second Cancel countdown is
    always shown. Calendar alone never starts a recording.
 
@@ -42,6 +44,8 @@
 ## 4. Before joining
 
 1. Open Meeting Recorder and confirm it shows no recording in progress.
+   Closing the red window button keeps detection running in the menu bar; use the menu-bar
+   icon's **Quit Meeting Recorder** command only when prompts are no longer wanted.
 2. For live speaker labels, enable **Live Speakers**. It labels the microphone as **Me** and
    remote diarization as **Remote 1**, **Remote 2**, etc. This adds up to two paid Soniox
    realtime streams.

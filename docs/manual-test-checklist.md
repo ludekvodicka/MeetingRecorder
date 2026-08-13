@@ -101,6 +101,10 @@ and say in the release notes what was not exercised.
 - [ ] Enable automatic recording, open a detected app/browser meeting, and cancel the visible
       10-second countdown; repeat and let it finish; confirm Calendar alone never counts down
 - [ ] Begin a countdown and close the meeting before zero: no recording starts
+- [ ] Close the macOS main window: it hides, the menu-bar icon remains, and a meeting still
+      prompts; choose Quit from the icon and confirm the process and localhost bridge stop
+- [ ] Enable Launch at login, log out/in, and confirm the app launches and detects a meeting;
+      disable it and confirm macOS no longer launches it
 - [ ] Dictation asks for Accessibility permission, and works once it is granted
 - [ ] Paste sends Cmd+V, not Ctrl+V
 - [ ] Note whether Ctrl+Space collides with the input source switcher on this machine

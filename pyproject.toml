@@ -50,6 +50,7 @@ dependencies = [
     "pyobjc-framework-CoreMedia>=10.3 ; sys_platform == 'darwin'",
     "pyobjc-framework-CoreAudio>=10.3 ; sys_platform == 'darwin'",
     "pyobjc-framework-EventKit>=10.3 ; sys_platform == 'darwin'",
+    "pyobjc-framework-ServiceManagement>=10.3 ; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

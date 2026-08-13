@@ -1,20 +1,23 @@
 import logging
 import os
 import shutil
+import sys
 import threading
 import time
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QStatusBar,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -159,6 +162,8 @@ class MainWindow(QMainWindow):
         self._observed_remote_speakers = set()
         self._speaker_segments = []
         self._pending_sidecars = {}
+        self._quitting = False
+        self._tray_icon = None
         self._browser_meeting_bridge = BrowserMeetingBridge()
         self._calendar_meeting_detector = create_calendar_detector()
         self._meeting_detector = CombinedMeetingDetector([
@@ -175,6 +180,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Meeting Recorder - v{__version__}")
         self.setMinimumSize(600, 650)
         self._build_ui()
+        self._create_tray_icon()
         self._refresh_list()
 
         self._system_level_signal.connect(self._level_bars.set_system_level)
@@ -186,6 +192,39 @@ class MainWindow(QMainWindow):
         self._meeting_timer.setInterval(5000)
         self._meeting_timer.timeout.connect(self._poll_for_meeting)
         self._sync_meeting_detection()
+
+    def _create_tray_icon(self):
+        """Keep macOS detection reachable after the main window is closed."""
+        if sys.platform != "darwin":
+            return
+        menu = QMenu(self)
+        show_action = QAction("Show Meeting Recorder", self)
+        show_action.triggered.connect(self._show_from_tray)
+        menu.addAction(show_action)
+        menu.addSeparator()
+        quit_action = QAction("Quit Meeting Recorder", self)
+        quit_action.triggered.connect(self._quit_from_tray)
+        menu.addAction(quit_action)
+
+        tray = QSystemTrayIcon(QApplication.instance().windowIcon(), self)
+        tray.setToolTip("Meeting Recorder · meeting detection is active")
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._tray_activated)
+        tray.show()
+        self._tray_icon = tray
+
+    def _show_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._show_from_tray()
+
+    def _quit_from_tray(self):
+        self._quitting = True
+        QApplication.instance().quit()
 
     def _start_update_check(self):
         """Ask GitHub for a newer release, off the UI thread, failing silently."""
@@ -1139,6 +1178,17 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Settings saved", 3000)
 
     def closeEvent(self, event):
+        if (self._tray_icon is not None and self._tray_icon.isVisible()
+                and event.spontaneous() and not self._quitting):
+            self.hide()
+            self._tray_icon.showMessage(
+                "Meeting Recorder is still running",
+                "Meeting detection remains active in the menu bar. Choose Quit there to exit.",
+                QSystemTrayIcon.MessageIcon.Information,
+                5000,
+            )
+            event.ignore()
+            return
         if self._is_recording:
             reply = QMessageBox.question(
                 self, "Recording in Progress",
@@ -1146,10 +1196,12 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.No:
+                self._quitting = False
                 event.ignore()
                 return
             self._stop_recording()
         if self._active_encoders or self._busy_paths:
+            self._quitting = False
             self._status_bar.showMessage(
                 "Finishing background work before exit. Close again when it is done.", 8000)
             event.ignore()
@@ -1159,6 +1211,8 @@ class MainWindow(QMainWindow):
         self._meeting_timer.stop()
         self._browser_meeting_bridge.stop()
         self._calendar_meeting_detector.stop()
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
         # The filter is installed on the whole application, so it goes on being called
         # after this window is gone. Qt then calls it on a half-destroyed object and
         # aborts the process.

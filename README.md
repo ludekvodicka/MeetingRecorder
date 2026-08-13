@@ -67,6 +67,11 @@ companion covers Google Meet, Zoom Web, and Teams Web. It can see only those mee
 has no history/tab-capture permission, and reports to `127.0.0.1` only. macOS Calendar is a
 separate opt-in signal for imminent events with attendees or a recognized conference link.
 
+On macOS, closing the main window keeps Meeting Recorder in the menu bar so detection remains
+available. Use the menu-bar icon to reopen or explicitly quit it. **Launch at login** is a
+separate opt-in in Settings, managed by macOS Service Management and visible in the system's
+Login Items controls.
+
 Automatic recording is also a separate opt-in. It applies only to a detected app/browser
 call, always shows a 10-second **Cancel** countdown, and cancels if the meeting disappears.
 A Calendar event by itself never starts recording.

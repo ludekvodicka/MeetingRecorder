@@ -50,6 +50,8 @@ DEFAULTS = {
     # Automatic start is deliberately separate from detection and always has a visible
     # cancelable countdown. Calendar-only signals never qualify.
     "automatic_recording": False,
+    # Registering a login item is a persistent OS change, so it is always explicit opt-in.
+    "launch_at_login": False,
 }
 
 

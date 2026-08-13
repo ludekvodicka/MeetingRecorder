@@ -54,6 +54,7 @@ def _runtime_smoke_test(platform_name=None):
         import EventKit  # noqa: F401
         import Quartz  # noqa: F401
         import ScreenCaptureKit  # noqa: F401
+        import ServiceManagement  # noqa: F401
 
         from audiorecorder.audio.macos_screen_capture import _make_serial_queue
 
@@ -78,6 +79,9 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Meeting Recorder")
+    if sys.platform == "darwin":
+        # Closing the window hides it into the menu bar so meeting detection remains alive.
+        app.setQuitOnLastWindowClosed(False)
     app.setStyle("Fusion")
     app.setWindowIcon(QIcon(str(asset_path("icon.svg"))))
 
