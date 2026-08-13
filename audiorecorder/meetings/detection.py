@@ -1,9 +1,11 @@
-"""Conservative native meeting-window detection with duplicate suppression."""
+"""Conservative macOS meeting detection with duplicate suppression."""
 
 import logging
 import re
 import sys
+import time
 from dataclasses import dataclass
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -14,6 +16,16 @@ class MeetingCandidate:
     app_name: str
     title: str
     source: str = "native-window"
+
+
+@dataclass(frozen=True)
+class MeetingDetectionStatus:
+    native_available: bool
+    scanned: bool
+    visible_apps: tuple[str, ...]
+    matched_apps: tuple[str, ...]
+    teams_media: str
+    error: str | None = None
 
 
 _RULES = (
@@ -85,6 +97,15 @@ class NullMeetingDetector:
     def scan(self):
         return []
 
+    def diagnostics(self):
+        return MeetingDetectionStatus(
+            native_available=False,
+            scanned=True,
+            visible_apps=(),
+            matched_apps=(),
+            teams_media="not supported",
+        )
+
 
 class CombinedMeetingDetector:
     def __init__(self, detectors):
@@ -98,13 +119,86 @@ class CombinedMeetingDetector:
         return list(combined.values())
 
 
-class MacOSMeetingDetector:
-    def __init__(self):
-        self._available = True
+class TeamsMediaDetector:
+    """Recognize active modern Teams media without inspecting meeting content."""
+
+    _DEFAULT_DIRECTORIES = (
+        Path.home() / "Library/Containers/com.microsoft.teams2/Data/Library/"
+        "Application Support/Microsoft/Teams/media-stack",
+        Path.home() / "Library/Application Support/Microsoft/Teams/media-stack",
+    )
+
+    def __init__(self, directories=None, clock=time.time, changes_required=2,
+                 activity_ttl=20):
+        self._directories = tuple(directories or self._DEFAULT_DIRECTORIES)
+        self._clock = clock
+        self._changes_required = changes_required
+        self._activity_ttl = activity_ttl
+        self._last_signature = None
+        self._consecutive_changes = 0
+        self._active_until = 0.0
+        self.state = "unavailable"
 
     def scan(self):
-        if not self._available:
+        now = self._clock()
+        signature = self._latest_signature()
+        if signature is None:
+            self._last_signature = None
+            self._consecutive_changes = 0
+            self._active_until = 0.0
+            self.state = "unavailable"
             return []
+
+        changed = self._last_signature is not None and signature != self._last_signature
+        self._last_signature = signature
+        _path, _size, modified_at = signature
+        recent = -5 <= now - modified_at <= self._activity_ttl
+        if changed and recent:
+            self._consecutive_changes += 1
+            if self._consecutive_changes >= self._changes_required:
+                self._active_until = now + self._activity_ttl
+        else:
+            self._consecutive_changes = 0
+
+        active = self._active_until > 0 and now <= self._active_until
+        self.state = "active" if active else "idle"
+        if not active:
+            return []
+        return [MeetingCandidate(
+            "teams:media-stack",
+            "Microsoft Teams",
+            "Active Microsoft Teams call",
+            source="teams-media",
+        )]
+
+    def _latest_signature(self):
+        latest = None
+        for directory in self._directories:
+            try:
+                files = directory.glob("*.blog")
+                for path in files:
+                    stat = path.stat()
+                    signature = (str(path), stat.st_size, stat.st_mtime)
+                    if latest is None or signature[2] > latest[2]:
+                        latest = signature
+            except OSError:
+                log.debug("could not inspect Teams media activity in %s", directory)
+        return latest
+
+
+class MacOSMeetingDetector:
+    def __init__(self, teams_media_detector=None):
+        self._teams_media_detector = teams_media_detector or TeamsMediaDetector()
+        self._status = MeetingDetectionStatus(
+            native_available=True,
+            scanned=False,
+            visible_apps=(),
+            matched_apps=(),
+            teams_media=self._teams_media_detector.state,
+        )
+
+    def scan(self):
+        teams_candidates = self._teams_media_detector.scan()
         try:
             import Quartz
 
@@ -124,13 +218,42 @@ class MacOSMeetingDetector:
                 }
                 for item in raw or []
             ]
-            return candidates_from_windows(windows)
-        except Exception:
+            native_candidates = candidates_from_windows(windows)
+            visible_apps = tuple(sorted({
+                str(window["owner"])
+                for window in windows
+                if window["owner"] and _is_meeting_app(str(window["owner"]))
+            }))
+            self._status = MeetingDetectionStatus(
+                native_available=True,
+                scanned=True,
+                visible_apps=visible_apps,
+                matched_apps=tuple(sorted({
+                    candidate.app_name for candidate in native_candidates
+                })),
+                teams_media=self._teams_media_detector.state,
+            )
+            return native_candidates + teams_candidates
+        except Exception as err:
             # Detection is a convenience. A framework or permission problem must never
             # interfere with manually starting a recording.
             log.exception("could not inspect native meeting windows")
-            self._available = False
-            return []
+            self._status = MeetingDetectionStatus(
+                native_available=False,
+                scanned=True,
+                visible_apps=(),
+                matched_apps=(),
+                teams_media=self._teams_media_detector.state,
+                error=str(err),
+            )
+            return teams_candidates
+
+    def diagnostics(self):
+        return self._status
+
+
+def _is_meeting_app(owner):
+    return any(owner_pattern.search(owner) for owner_pattern, _title, _app in _RULES)
 
 
 def create_meeting_detector(platform_name=None):

@@ -55,7 +55,8 @@
 3. Enable **RTS Translate** only if live translation is needed; it adds another paid realtime
    stream.
 4. Join the meeting. Native Teams/Zoom/Webex/Slack Huddle or the optional browser companion
-   should show a recording prompt. Choose **Start Recording** (or let the opted-in countdown
+   should show a recording prompt. Native Teams media detection is intentionally conservative,
+   so allow up to about 20 seconds. Choose **Start Recording** (or let the opted-in countdown
    finish).
 5. Confirm both level meters move. If system audio does not move, stop immediately and fix
    Screen & System Audio Recording permission before continuing.
@@ -73,4 +74,5 @@
 If no prompt appears, recording still works manually. Check that meeting detection is enabled,
 Meeting Recorder is still running, and—only for browser calls—the unpacked extension remains
 enabled. The app status bar must say **Browser: connected**; if it does not, open Settings and
-reveal/load the bundled companion again.
+reveal/load the bundled companion again. For native Teams, open Settings after joining and
+check that **Teams media monitor** changes from **idle** to **active**.

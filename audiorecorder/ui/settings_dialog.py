@@ -27,10 +27,11 @@ from audiorecorder.meetings.browser_companion import (
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config, parent=None, browser_bridge=None):
+    def __init__(self, config, parent=None, browser_bridge=None, meeting_detector=None):
         super().__init__(parent)
         self.config = dict(config)
         self._browser_bridge = browser_bridge
+        self._meeting_detector = meeting_detector
         self.setWindowTitle("Settings")
         self.setMinimumWidth(450)
         self._build_ui()
@@ -106,6 +107,19 @@ class SettingsDialog(QDialog):
         browser_help.setWordWrap(True)
         browser_layout.addRow("", browser_help)
         layout.addWidget(browser_group)
+
+        # --- Native detector diagnostics ---
+        native_group = QGroupBox("Native Meeting Detection")
+        native_layout = QVBoxLayout(native_group)
+        self._native_status = QLabel()
+        self._native_status.setWordWrap(True)
+        native_layout.addWidget(self._native_status)
+        refresh_native = QPushButton("Refresh Diagnostics")
+        refresh_native.clicked.connect(self._refresh_native_status)
+        native_layout.addWidget(refresh_native)
+        self._refresh_native_status()
+        native_group.setVisible(sys.platform == "darwin")
+        layout.addWidget(native_group)
 
         # --- Audio ---
         audio_group = QGroupBox("Audio Devices")
@@ -215,6 +229,25 @@ class SettingsDialog(QDialog):
             f"4. Select this folder:\n{directory}\n\n"
             "Keep Meeting Recorder running. Settings will then show Connected.",
         )
+
+    def _refresh_native_status(self):
+        if self._meeting_detector is None:
+            message = "Available after Meeting Recorder starts"
+        else:
+            status = self._meeting_detector.diagnostics()
+            if not status.scanned:
+                message = "Waiting for the first scan"
+            else:
+                native = "OK" if status.native_available else "unavailable"
+                visible = ", ".join(status.visible_apps) or "none"
+                matched = ", ".join(status.matched_apps) or "none"
+                message = (
+                    f"Native window scan: {native}. Visible supported apps: {visible}. "
+                    f"Matched calls: {matched}. Teams media monitor: {status.teams_media}."
+                )
+                if status.error:
+                    message += f" Last error: {status.error}"
+        self._native_status.setText(message)
 
     def _populate_devices(self):
         try:

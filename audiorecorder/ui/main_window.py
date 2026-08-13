@@ -58,7 +58,7 @@ from audiorecorder.version import __version__
 log = logging.getLogger(__name__)
 
 AUTO_START_SECONDS = 10
-AUTO_START_SOURCES = frozenset({"native-window", "browser-extension"})
+AUTO_START_SOURCES = frozenset({"native-window", "browser-extension", "teams-media"})
 
 # Both header toggles look the same when they are on: green means this is costing you
 # a live Soniox session.
@@ -166,8 +166,9 @@ class MainWindow(QMainWindow):
         self._tray_icon = None
         self._browser_meeting_bridge = BrowserMeetingBridge()
         self._calendar_meeting_detector = create_calendar_detector()
+        self._native_meeting_detector = create_meeting_detector()
         self._meeting_detector = CombinedMeetingDetector([
-            create_meeting_detector(),
+            self._native_meeting_detector,
             self._browser_meeting_bridge,
             self._calendar_meeting_detector,
         ])
@@ -1191,6 +1192,7 @@ class MainWindow(QMainWindow):
             self.config,
             self,
             browser_bridge=self._browser_meeting_bridge,
+            meeting_detector=self._native_meeting_detector,
         )
         if dialog.exec():
             self.config = dialog.get_config()

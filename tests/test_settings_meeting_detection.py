@@ -1,6 +1,7 @@
 import pytest
 from PyQt6.QtWidgets import QApplication
 
+from audiorecorder.meetings.detection import MeetingDetectionStatus
 from audiorecorder.ui import settings_dialog as settings_module
 from audiorecorder.ui.settings_dialog import SettingsDialog
 
@@ -69,3 +70,25 @@ def test_launch_at_login_is_applied_when_settings_are_saved(dialog, monkeypatch)
     dialog._save_and_close()
     assert applied == [True]
     assert dialog.get_config()["launch_at_login"] is True
+
+
+def test_native_diagnostics_explain_the_last_scan(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings_module, "create_backend", FakeBackend)
+    monkeypatch.setattr(settings_module.secrets, "has_stored_key", lambda: False)
+    monkeypatch.setattr(settings_module.sys, "platform", "darwin")
+    monkeypatch.setattr(settings_module.macos_login, "login_item_registered", lambda: False)
+
+    class Detector:
+        def diagnostics(self):
+            return MeetingDetectionStatus(
+                native_available=True,
+                scanned=True,
+                visible_apps=("Microsoft Teams",),
+                matched_apps=(),
+                teams_media="idle",
+            )
+
+    built = SettingsDialog({"output_dir": str(tmp_path)}, meeting_detector=Detector())
+    assert "Visible supported apps: Microsoft Teams" in built._native_status.text()
+    assert "Teams media monitor: idle" in built._native_status.text()
+    built.deleteLater()

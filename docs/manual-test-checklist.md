@@ -94,6 +94,9 @@ and say in the release notes what was not exercised.
       M4A succeeds, contain the final names for earlier lines too, and follow rename/delete
 - [ ] Open a Teams or Zoom meeting window: one prompt appears after the stable detection;
       dismissing it does not produce another prompt until that meeting window disappears
+- [ ] Join a modern Teams call whose window title is only the meeting subject: within about
+      20 seconds Settings reports Teams media monitor active and one prompt appears; ordinary
+      Teams browsing and chat do not trigger it
 - [ ] Reveal the app-bundled browser companion from Settings and load it in Brave/Chrome/Edge;
       confirm the status bar says Browser: connected, open a Google Meet code URL, and confirm
       the same prompt; moving to a non-meeting page removes the signal
