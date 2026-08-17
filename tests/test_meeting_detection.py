@@ -30,6 +30,13 @@ class TestNativeClassification:
             window("Microsoft Teams", "Weekly deployment meeting")])
         assert found[0].app_name == "Microsoft Teams"
 
+    def test_modern_teams_subject_window_is_detected(self):
+        found = candidates_from_windows([window(
+            "Microsoft Teams",
+            "WP EBSI & Smart Contract v1.0 | CTU | haraslub@cvut.cz | Microsoft Teams",
+        )])
+        assert found[0].app_name == "Microsoft Teams"
+
     def test_zoom_meeting_is_detected(self):
         found = candidates_from_windows([
             window("zoom.us", "Zoom Meeting", window_id=3)])
@@ -45,6 +52,23 @@ class TestNativeClassification:
     def test_an_ordinary_teams_window_does_not_interrupt_the_user(self):
         assert candidates_from_windows([
             window("Microsoft Teams", "Chat | Albert Švehla")]) == []
+
+    def test_full_modern_teams_navigation_titles_are_not_calls(self):
+        for section in ("Activity", "Calendar", "Calls", "Chat", "Teams"):
+            title = f"{section} | CTU | haraslub@cvut.cz | Microsoft Teams"
+            assert candidates_from_windows([window("Microsoft Teams", title)]) == []
+
+    def test_chat_named_after_a_meeting_is_not_treated_as_a_call(self):
+        assert candidates_from_windows([window(
+            "Microsoft Teams",
+            "Chat | Weekly meeting | CTU | haraslub@cvut.cz | Microsoft Teams",
+        )]) == []
+
+    def test_ambiguous_channel_title_is_not_treated_as_a_call(self):
+        assert candidates_from_windows([window(
+            "Microsoft Teams",
+            "General | Engineering | CTU | haraslub@cvut.cz | Microsoft Teams",
+        )]) == []
 
     def test_background_and_overlay_windows_are_ignored(self):
         assert candidates_from_windows([

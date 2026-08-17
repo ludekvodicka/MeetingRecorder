@@ -28,9 +28,14 @@ class MeetingDetectionStatus:
     error: str | None = None
 
 
+_TEAMS_OWNER = re.compile(r"microsoft teams", re.I)
+_TEAMS_EXPLICIT_CALL = re.compile(r"\b(meeting|call|lobby|pre[- ]?join)\b", re.I)
+_TEAMS_NON_CALL_PREFIX = re.compile(
+    r"^(activity|apps|calendar|calls|chat|copilot|files|onedrive|teams)\s*\|",
+    re.I,
+)
+
 _RULES = (
-    (re.compile(r"microsoft teams", re.I),
-     re.compile(r"\b(meeting|call|lobby|pre[- ]?join)\b", re.I), "Microsoft Teams"),
     (re.compile(r"^(zoom|zoom\.us)$", re.I),
      re.compile(r"\b(zoom meeting|webinar|waiting for host)\b", re.I), "Zoom"),
     (re.compile(r"webex", re.I),
@@ -50,15 +55,39 @@ def candidates_from_windows(windows):
         title = str(window.get("title", ""))
         if not owner or not title:
             continue
-        for owner_pattern, title_pattern, app_name in _RULES:
-            if not owner_pattern.search(owner) or not title_pattern.search(title):
-                continue
+        app_name = _classify_window(owner, title)
+        if app_name:
             key = f"{window.get('pid', owner)}:{window.get('window_id', title)}"
             if key not in seen:
                 candidates.append(MeetingCandidate(key, app_name, title))
                 seen.add(key)
-            break
     return candidates
+
+
+def _classify_window(owner, title):
+    if _TEAMS_OWNER.search(owner) and _is_teams_call_title(title):
+        return "Microsoft Teams"
+    for owner_pattern, title_pattern, app_name in _RULES:
+        if owner_pattern.search(owner) and title_pattern.search(title):
+            return app_name
+    return None
+
+
+def _is_teams_call_title(title):
+    if _TEAMS_NON_CALL_PREFIX.search(title):
+        return False
+    if _TEAMS_EXPLICIT_CALL.search(title):
+        return True
+    # Current Teams uses the meeting subject as the call-window title, followed by the
+    # organization, signed-in account, and product name. Requiring that exact structure
+    # avoids treating arbitrary Teams content or pop-out chats as calls.
+    parts = [part.strip() for part in title.split("|")]
+    return (
+        len(parts) == 4
+        and bool(parts[0])
+        and "@" in parts[-2]
+        and parts[-1].casefold() == "microsoft teams"
+    )
 
 
 class MeetingPromptPolicy:
@@ -253,7 +282,9 @@ class MacOSMeetingDetector:
 
 
 def _is_meeting_app(owner):
-    return any(owner_pattern.search(owner) for owner_pattern, _title, _app in _RULES)
+    return _TEAMS_OWNER.search(owner) is not None or any(
+        owner_pattern.search(owner) for owner_pattern, _title, _app in _RULES
+    )
 
 
 def create_meeting_detector(platform_name=None):
