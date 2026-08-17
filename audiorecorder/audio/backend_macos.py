@@ -1,15 +1,19 @@
 """macOS capture through ScreenCaptureKit with virtual-device compatibility."""
 
+import logging
 import os
 import platform
 import time
 
+import sounddevice as sd
 import soundfile as sf
 
 from audiorecorder.audio.backend import CaptureError
 from audiorecorder.audio.backend_portaudio import PortAudioBackend
+from audiorecorder.audio.device_selection import macos_builtin_microphones
 
 NATIVE_SYSTEM_SOURCE = "System Audio (native)"
+log = logging.getLogger(__name__)
 
 
 def native_system_audio_supported(version=None):
@@ -24,6 +28,43 @@ def native_system_audio_supported(version=None):
 
 class MacOSBackend(PortAudioBackend):
     """Use native system capture by default and explicit routed inputs on request."""
+
+    def _open_microphone(self, tmp_dir, mic_source, stamp):
+        preferred = self._resolve_microphone(mic_source)
+        try:
+            self._open_microphone_device(tmp_dir, preferred, stamp)
+            return
+        except sd.PortAudioError as error:
+            preferred_error = error
+            log.warning(
+                "microphone %r could not open; trying the built-in macOS microphone: %s",
+                preferred[1]["name"],
+                preferred_error,
+            )
+
+        try:
+            fallbacks = macos_builtin_microphones(sd, excluded_indices={preferred[0]})
+        except Exception:
+            log.exception("could not refresh microphones after the preferred input failed")
+            raise preferred_error from None
+
+        for fallback in fallbacks:
+            try:
+                self._open_microphone_device(tmp_dir, fallback, stamp)
+                log.warning(
+                    "recording with fallback microphone %r because %r was unavailable",
+                    fallback[1]["name"],
+                    preferred[1]["name"],
+                )
+                return
+            except sd.PortAudioError as fallback_error:
+                log.warning(
+                    "fallback microphone %r could not open: %s",
+                    fallback[1]["name"],
+                    fallback_error,
+                )
+
+        raise preferred_error
 
     def _native_system_callback(self, data):
         self._system_callback(data, len(data), None, None)

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from audiorecorder.audio import backend_macos
 from audiorecorder.audio import macos_screen_capture as native
 from audiorecorder.audio.backend import CaptureError
 from audiorecorder.audio.backend_macos import MacOSBackend, native_system_audio_supported
@@ -95,6 +96,96 @@ def test_default_macos_source_opens_native_system_and_microphone(monkeypatch, tm
     assert opened[0][2] == opened[1][3]
     assert opened[2] == ("start",)
     assert backend.is_recording
+
+
+def test_busy_default_microphone_falls_back_to_macbook_input(monkeypatch, tmp_path):
+    class PortAudioError(Exception):
+        pass
+
+    preferred = (0, {
+        "name": "Luboš’s AirPods Pro", "default_samplerate": 24000,
+        "max_input_channels": 1,
+    })
+    builtin = (1, {
+        "name": "MacBook Air Microphone", "default_samplerate": 48000,
+        "max_input_channels": 1,
+    })
+    fake_audio = SimpleNamespace(
+        PortAudioError=PortAudioError,
+        query_devices=lambda: [preferred[1], builtin[1]],
+    )
+    backend = MacOSBackend()
+    opened = []
+    monkeypatch.setattr(backend_macos, "sd", fake_audio)
+    monkeypatch.setattr(backend, "_resolve_microphone", lambda source: preferred)
+
+    def open_device(tmp_dir, device, stamp):
+        opened.append(device)
+        if device is preferred:
+            raise PortAudioError("Internal PortAudio error")
+
+    monkeypatch.setattr(backend, "_open_microphone_device", open_device)
+
+    backend._open_microphone(str(tmp_path), None, 123)
+
+    assert opened == [preferred, builtin]
+
+
+def test_original_microphone_error_is_preserved_when_fallback_also_fails(
+        monkeypatch, tmp_path):
+    class PortAudioError(Exception):
+        pass
+
+    preferred = (0, {
+        "name": "Luboš’s AirPods Pro", "default_samplerate": 24000,
+        "max_input_channels": 1,
+    })
+    builtin = (1, {
+        "name": "MacBook Air Microphone", "default_samplerate": 48000,
+        "max_input_channels": 1,
+    })
+    fake_audio = SimpleNamespace(
+        PortAudioError=PortAudioError,
+        query_devices=lambda: [preferred[1], builtin[1]],
+    )
+    backend = MacOSBackend()
+    monkeypatch.setattr(backend_macos, "sd", fake_audio)
+    monkeypatch.setattr(backend, "_resolve_microphone", lambda source: preferred)
+
+    def fail_to_open(tmp_dir, device, stamp):
+        message = "AirPods busy" if device is preferred else "built-in busy"
+        raise PortAudioError(message)
+
+    monkeypatch.setattr(backend, "_open_microphone_device", fail_to_open)
+
+    with pytest.raises(PortAudioError, match="AirPods busy"):
+        backend._open_microphone(str(tmp_path), None, 123)
+
+
+def test_original_microphone_error_is_preserved_when_device_refresh_fails(
+        monkeypatch, tmp_path):
+    class PortAudioError(Exception):
+        pass
+
+    preferred = (0, {
+        "name": "Luboš’s AirPods Pro", "default_samplerate": 24000,
+        "max_input_channels": 1,
+    })
+    fake_audio = SimpleNamespace(
+        PortAudioError=PortAudioError,
+        query_devices=lambda: (_ for _ in ()).throw(PortAudioError("refresh failed")),
+    )
+    backend = MacOSBackend()
+    monkeypatch.setattr(backend_macos, "sd", fake_audio)
+    monkeypatch.setattr(backend, "_resolve_microphone", lambda source: preferred)
+    monkeypatch.setattr(
+        backend,
+        "_open_microphone_device",
+        lambda *args: (_ for _ in ()).throw(PortAudioError("AirPods busy")),
+    )
+
+    with pytest.raises(PortAudioError, match="AirPods busy"):
+        backend._open_microphone(str(tmp_path), None, 123)
 
 
 def test_explicit_macos_source_uses_legacy_routed_capture(monkeypatch, tmp_path):

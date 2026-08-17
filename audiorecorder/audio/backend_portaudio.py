@@ -95,18 +95,34 @@ class PortAudioBackend(CaptureBackend):
         self._prepare_tap(rate)
 
     def _open_microphone(self, tmp_dir, mic_source, stamp):
-        mic_index, mic_info = self._resolve_microphone(mic_source)
+        mic_device = self._resolve_microphone(mic_source)
+        self._open_microphone_device(tmp_dir, mic_device, stamp)
+
+    def _open_microphone_device(self, tmp_dir, mic_device, stamp):
+        """Open one resolved microphone without leaving partial resources on failure."""
+        mic_index, mic_info = mic_device
         mic_rate = int(mic_info["default_samplerate"])
-        self._active_mic_source = mic_info["name"]
-        self._mic_path = os.path.join(tmp_dir, f"_rec_mic_{stamp}.wav")
-        self._mic_writer = sf.SoundFile(
-            self._mic_path, mode="w", samplerate=mic_rate,
-            channels=1, format="WAV", subtype="FLOAT",
-        )
-        self._mic_stream = sd.InputStream(
+        mic_path = os.path.join(tmp_dir, f"_rec_mic_{stamp}.wav")
+        mic_stream = sd.InputStream(
             device=mic_index, channels=1, samplerate=mic_rate, dtype="float32",
             blocksize=BLOCK_SIZE, callback=self._mic_callback,
         )
+        try:
+            mic_writer = sf.SoundFile(
+                mic_path, mode="w", samplerate=mic_rate,
+                channels=1, format="WAV", subtype="FLOAT",
+            )
+        except Exception:
+            try:
+                mic_stream.close()
+            except Exception:
+                log.exception("could not close the microphone after its file failed to open")
+            raise
+
+        self._active_mic_source = mic_info["name"]
+        self._mic_path = mic_path
+        self._mic_writer = mic_writer
+        self._mic_stream = mic_stream
         self._prepare_mic_tap(mic_rate)
 
     def _start_open_streams(self):

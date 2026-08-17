@@ -6,6 +6,7 @@ from audiorecorder.audio.device_selection import (
     DeviceResolutionError,
     default_input_device,
     find_input_device,
+    macos_builtin_microphones,
     resolve_microphone,
 )
 
@@ -77,6 +78,20 @@ def test_truncated_device_names_can_be_matched_when_requested():
     api = FakeAudioApi(DEVICES)
     found = find_input_device(api, "MacBook Micro", allow_prefix=True)
     assert found[1]["name"] == "MacBook Microphone"
+
+
+def test_macos_fallbacks_include_only_builtin_hardware_microphones():
+    devices = [
+        {"name": "Luboš’s AirPods Pro", "max_input_channels": 1},
+        {"name": "MacBook Air Microphone", "max_input_channels": 1},
+        {"name": "Microsoft Teams Audio", "max_input_channels": 1},
+        {"name": "BlackHole 2ch", "max_input_channels": 2},
+        {"name": "Studio Display Microphone", "max_input_channels": 1},
+    ]
+
+    assert [info["name"] for _, info in macos_builtin_microphones(
+        FakeAudioApi(devices), excluded_indices={4},
+    )] == ["MacBook Air Microphone"]
 
 
 @pytest.mark.parametrize("index", [None, -1])
