@@ -3,6 +3,8 @@
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
+from audiorecorder.ui.macos_spaces import show_on_all_spaces
+
 
 class MeetingPrompt(QDialog):
     def __init__(self, candidate, parent=None, auto_start_seconds=None):
@@ -70,6 +72,10 @@ class MeetingPrompt(QDialog):
             f"{self.candidate.app_name} appears to have an active meeting:\n\n"
             f"{self.candidate.title}\n\nRecording starts automatically in "
             f"{self._remaining} {unit}. Choose Cancel to stop it.")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        show_on_all_spaces(self)
 
     def done(self, result):
         self._countdown.stop()

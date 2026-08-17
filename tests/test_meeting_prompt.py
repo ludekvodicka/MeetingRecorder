@@ -1,4 +1,5 @@
 import pytest
+from PyQt6.QtGui import QShowEvent
 from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 
 from audiorecorder.meetings.detection import MeetingCandidate
@@ -41,6 +42,18 @@ def test_not_now_rejects_the_prompt(prompt):
     prompt.rejected.connect(lambda: rejected.append(True))
     button(prompt, "Not Now").click()
     assert rejected == [True]
+
+
+def test_showing_the_prompt_configures_macos_space_visibility(prompt, monkeypatch):
+    configured = []
+    monkeypatch.setattr(
+        "audiorecorder.ui.meeting_prompt.show_on_all_spaces",
+        lambda widget: configured.append(widget),
+    )
+
+    prompt.showEvent(QShowEvent())
+
+    assert configured == [prompt]
 
 
 def test_automatic_prompt_counts_down_and_accepts(app):
