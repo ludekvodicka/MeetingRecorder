@@ -68,7 +68,8 @@ has no history/tab-capture permission, and reports to `127.0.0.1` only. macOS Ca
 separate opt-in signal for imminent events with attendees or a recognized conference link.
 Modern Teams is also recognized from repeated changes to its local media-stack file metadata;
 the detector does not read call logs, messages, or meeting content. Settings shows the latest
-native-window and Teams-media diagnostic state.
+native-window and Teams-media diagnostic state. If macOS redacts Teams window titles, the
+detector can still recognize the call-control surface from its non-content window geometry.
 
 On macOS, closing the main window keeps Meeting Recorder in the menu bar so detection remains
 available. Use the menu-bar icon to reopen or explicitly quit it. **Launch at login** is a

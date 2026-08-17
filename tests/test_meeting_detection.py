@@ -13,7 +13,7 @@ from audiorecorder.meetings.detection import (
 )
 
 
-def window(owner, title, *, pid=1, window_id=2, layer=0, on_screen=True):
+def window(owner, title, *, pid=1, window_id=2, layer=0, on_screen=True, bounds=None):
     return {
         "owner": owner,
         "title": title,
@@ -21,6 +21,7 @@ def window(owner, title, *, pid=1, window_id=2, layer=0, on_screen=True):
         "window_id": window_id,
         "layer": layer,
         "on_screen": on_screen,
+        "bounds": bounds or {},
     }
 
 
@@ -69,6 +70,41 @@ class TestNativeClassification:
             "Microsoft Teams",
             "General | Engineering | CTU | haraslub@cvut.cz | Microsoft Teams",
         )]) == []
+
+    def test_teams_call_controls_work_when_macos_redacts_the_title(self):
+        found = candidates_from_windows([window(
+            "Microsoft Teams",
+            "",
+            layer=26,
+            bounds={"Width": 1710, "Height": 39},
+        )])
+        assert found == [MeetingCandidate(
+            "1:teams-call-controls",
+            "Microsoft Teams",
+            "Active Microsoft Teams call",
+        )]
+
+    def test_small_teams_notification_overlay_is_not_a_call(self):
+        assert candidates_from_windows([window(
+            "Microsoft Teams (Notification Center)",
+            "Window",
+            layer=20,
+            bounds={"Width": 320, "Height": 400},
+        )]) == []
+
+    def test_call_controls_do_not_duplicate_a_titled_teams_candidate(self):
+        found = candidates_from_windows([
+            window("Microsoft Teams", "Weekly meeting", window_id=3),
+            window(
+                "Microsoft Teams",
+                "",
+                layer=26,
+                window_id=4,
+                bounds={"Width": 1710, "Height": 39},
+            ),
+        ])
+        assert len(found) == 1
+        assert found[0].key == "1:3"
 
     def test_background_and_overlay_windows_are_ignored(self):
         assert candidates_from_windows([
@@ -144,6 +180,7 @@ def test_native_scan_retries_after_a_transient_quartz_failure(monkeypatch):
         kCGWindowNumber="window_id",
         kCGWindowLayer="layer",
         kCGWindowIsOnscreen="on_screen",
+        kCGWindowBounds="bounds",
     )
     monkeypatch.setitem(sys.modules, "Quartz", quartz)
 

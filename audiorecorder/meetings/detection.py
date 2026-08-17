@@ -61,6 +61,21 @@ def candidates_from_windows(windows):
             if key not in seen:
                 candidates.append(MeetingCandidate(key, app_name, title))
                 seen.add(key)
+
+    # Without Screen Recording permission macOS may redact another app's title while still
+    # exposing owner, layer, and bounds. Modern Teams adds a wide, thin elevated call-control
+    # surface during an active call. Use it only when no titled Teams call already matched.
+    if not any(candidate.app_name == "Microsoft Teams" for candidate in candidates):
+        for window in windows:
+            if not _is_teams_call_control(window):
+                continue
+            key = f"{window.get('pid', 'teams')}:teams-call-controls"
+            candidates.append(MeetingCandidate(
+                key,
+                "Microsoft Teams",
+                "Active Microsoft Teams call",
+            ))
+            break
     return candidates
 
 
@@ -88,6 +103,21 @@ def _is_teams_call_title(title):
         and "@" in parts[-2]
         and parts[-1].casefold() == "microsoft teams"
     )
+
+
+def _is_teams_call_control(window):
+    if not window.get("on_screen", True):
+        return False
+    if not _TEAMS_OWNER.search(str(window.get("owner", ""))):
+        return False
+    try:
+        layer = int(window.get("layer", 0))
+        bounds = window.get("bounds") or {}
+        width = float(bounds.get("Width", 0))
+        height = float(bounds.get("Height", 0))
+    except (TypeError, ValueError):
+        return False
+    return layer >= 20 and width >= 600 and 20 <= height <= 100
 
 
 class MeetingPromptPolicy:
@@ -244,6 +274,7 @@ class MacOSMeetingDetector:
                     "window_id": item.get(Quartz.kCGWindowNumber, ""),
                     "layer": item.get(Quartz.kCGWindowLayer, 0),
                     "on_screen": item.get(Quartz.kCGWindowIsOnscreen, True),
+                    "bounds": item.get(Quartz.kCGWindowBounds, {}),
                 }
                 for item in raw or []
             ]
