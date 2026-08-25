@@ -30,7 +30,7 @@ class RejectingWindow(FakeWindow):
         raise RuntimeError("AppKit rejected the collection behavior")
 
 
-def install_fake_appkit(monkeypatch, window):
+def install_fake_appkit(monkeypatch, window, *, supports_all_applications=True):
     pointers = []
 
     class FakeView:
@@ -41,14 +41,21 @@ def install_fake_appkit(monkeypatch, window):
         pointers.append(c_void_p.value)
         return FakeView()
 
+    appkit_constants = {
+        "NSWindowCollectionBehaviorCanJoinAllSpaces": 1,
+        "NSWindowCollectionBehaviorMoveToActiveSpace": 2,
+        "NSWindowCollectionBehaviorFullScreenAuxiliary": 256,
+    }
+    if supports_all_applications:
+        appkit_constants.update({
+            "NSWindowCollectionBehaviorPrimary": 65_536,
+            "NSWindowCollectionBehaviorAuxiliary": 131_072,
+            "NSWindowCollectionBehaviorCanJoinAllApplications": 262_144,
+        })
     monkeypatch.setitem(
         sys.modules,
         "AppKit",
-        SimpleNamespace(
-            NSWindowCollectionBehaviorCanJoinAllSpaces=1,
-            NSWindowCollectionBehaviorMoveToActiveSpace=2,
-            NSWindowCollectionBehaviorFullScreenAuxiliary=256,
-        ),
+        SimpleNamespace(**appkit_constants),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -66,12 +73,24 @@ def test_non_macos_does_not_request_a_native_window():
 
 
 def test_macos_window_joins_all_and_full_screen_spaces(monkeypatch):
-    window = FakeWindow()
+    unrelated_behavior = 8
+    auxiliary_behavior = 131_072
+    window = FakeWindow(2 | unrelated_behavior | auxiliary_behavior)
     pointers = install_fake_appkit(monkeypatch, window)
 
     assert show_on_all_spaces(
         FakeWidget(123), platform_name="darwin", qt_platform_name="cocoa")
     assert pointers == [123]
+    assert window.behavior == unrelated_behavior | 1 | 256 | 262_144
+
+
+def test_older_appkit_uses_available_space_behaviors(monkeypatch):
+    window = FakeWindow()
+    install_fake_appkit(
+        monkeypatch, window, supports_all_applications=False)
+
+    assert show_on_all_spaces(
+        FakeWidget(), platform_name="darwin", qt_platform_name="cocoa")
     assert window.behavior == 8 | 1 | 256
 
 

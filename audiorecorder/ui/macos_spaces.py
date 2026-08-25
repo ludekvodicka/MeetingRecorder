@@ -39,6 +39,20 @@ def show_on_all_spaces(widget, platform_name=None, qt_platform_name=None):
         # exclusive with CanJoinAllSpaces and raises an Objective-C exception if both
         # are present, so replace the default instead of only adding another flag.
         behavior &= ~AppKit.NSWindowCollectionBehaviorMoveToActiveSpace
+
+        # Newer AppKit versions distinguish joining this application's Spaces from
+        # joining another application's exclusive full-screen Space. The latter is
+        # intended for floating overlays such as this prompt. It is mutually exclusive
+        # with the Stage Manager primary/auxiliary roles, so clear those roles first.
+        can_join_all_apps = getattr(
+            AppKit, "NSWindowCollectionBehaviorCanJoinAllApplications", 0)
+        if can_join_all_apps:
+            behavior &= ~(
+                getattr(AppKit, "NSWindowCollectionBehaviorPrimary", 0)
+                | getattr(AppKit, "NSWindowCollectionBehaviorAuxiliary", 0)
+            )
+            behavior |= can_join_all_apps
+
         behavior |= (
             AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
             | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
