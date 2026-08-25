@@ -388,6 +388,30 @@ class TestMeetingPopupIntegration:
         assert w._meeting_prompt is not None
         w._meeting_prompt.reject()
 
+    def test_macos_prompt_is_not_tied_to_the_main_window_space(
+            self, window, monkeypatch):
+        w = window(rts_translate=False)
+        w._meeting_detector = self.Detector(self.candidate)
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        monkeypatch.setattr(mw.sys, "platform", "darwin")
+
+        w._poll_for_meeting()
+
+        assert w._meeting_prompt.parent() is None
+        w._meeting_prompt.reject()
+
+    def test_other_platforms_keep_the_existing_prompt_ownership(
+            self, window, monkeypatch):
+        w = window(rts_translate=False)
+        w._meeting_detector = self.Detector(self.candidate)
+        w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
+        monkeypatch.setattr(mw.sys, "platform", "linux")
+
+        w._poll_for_meeting()
+
+        assert w._meeting_prompt.parent() is w
+        w._meeting_prompt.reject()
+
     def test_accepting_the_prompt_starts_the_normal_recorder(self, window):
         w = window(rts_translate=False)
         w._meeting_detector = self.Detector(self.candidate)

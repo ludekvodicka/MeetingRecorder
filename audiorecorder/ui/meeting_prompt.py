@@ -1,5 +1,7 @@
 """Non-modal prompt offered when a likely call window appears."""
 
+import sys
+
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
@@ -13,6 +15,12 @@ class MeetingPrompt(QDialog):
         self._remaining = auto_start_seconds
         self._countdown_elapsed = False
         self.setWindowTitle("Meeting detected")
+        if sys.platform == "darwin":
+            # A parentless macOS Tool becomes an NSPanel. Unlike an ordinary dialog,
+            # it remains eligible to overlay another application's full-screen Space.
+            self.setWindowFlag(Qt.WindowType.Tool, True)
+            self.setAttribute(
+                Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setModal(False)
         self.setMinimumWidth(380)

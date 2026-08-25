@@ -71,6 +71,12 @@ ACTIVE_TOGGLE_STYLE = """
 """
 
 
+def _meeting_prompt_parent(window, platform_name=None):
+    """Keep macOS prompts independent so they can join another app's Space."""
+    platform_name = platform_name or sys.platform
+    return None if platform_name == "darwin" else window
+
+
 def _fanout(consumers):
     """One non-blocking capture callback for zero, one, or several realtime queues."""
     consumers = tuple(consumers)
@@ -298,7 +304,7 @@ class MainWindow(QMainWindow):
         )
         prompt = MeetingPrompt(
             candidate,
-            self,
+            _meeting_prompt_parent(self),
             auto_start_seconds=AUTO_START_SECONDS if automatic else None,
         )
         self._meeting_prompt = prompt
@@ -1233,6 +1239,8 @@ class MainWindow(QMainWindow):
             return
         if self._dictation_active:
             self._stop_dictation()
+        if self._meeting_prompt is not None:
+            self._meeting_prompt.close()
         self._meeting_timer.stop()
         self._browser_meeting_bridge.stop()
         self._calendar_meeting_detector.stop()

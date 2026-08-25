@@ -1,4 +1,5 @@
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QShowEvent
 from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 
@@ -54,6 +55,18 @@ def test_showing_the_prompt_configures_macos_space_visibility(prompt, monkeypatc
     prompt.showEvent(QShowEvent())
 
     assert configured == [prompt]
+
+
+def test_macos_prompt_remains_visible_while_another_app_is_active(app, monkeypatch):
+    monkeypatch.setattr("audiorecorder.ui.meeting_prompt.sys.platform", "darwin")
+    prompt = MeetingPrompt(
+        MeetingCandidate("1:2", "Zoom", "Project sync"))
+    try:
+        assert prompt.windowFlags() & Qt.WindowType.Tool
+        assert prompt.testAttribute(
+            Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+    finally:
+        prompt.deleteLater()
 
 
 def test_automatic_prompt_counts_down_and_accepts(app):
