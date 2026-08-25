@@ -149,6 +149,13 @@ def package_macos():
             "spctl", "--assess", "--type", "open", "--context",
             "context:primary-signature", "--verbose=2", str(target),
         ])
+    # Do not leave a second application bundle with the same bundle identifier on
+    # the machine. Spotlight and Launch Services can register both the build copy
+    # and the installed copy, while their ad-hoc signatures differ. That makes the
+    # Screen Recording permission appear enabled for one identity and denied for
+    # the other. The DMG is the package output; `build` remains available when a
+    # developer explicitly needs the unpackaged application bundle.
+    shutil.rmtree(app)
     return [target]
 
 

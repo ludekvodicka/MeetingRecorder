@@ -32,6 +32,7 @@ def test_macos_package_verifies_app_before_creating_dmg(macos_package, monkeypat
     assert commands[0][:4] == ["codesign", "--verify", "--deep", "--strict"]
     assert commands[1][0:2] == ["hdiutil", "create"]
     assert artifacts == [release / f"Meeting-Recorder-{build.__version__}-arm64.dmg"]
+    assert not (build.DIST / "Meeting Recorder.app").exists()
 
 
 def test_macos_package_can_notarize_and_staple(macos_package, monkeypatch):

@@ -226,8 +226,11 @@ python scripts/build.py package   # writes installers into release/
 ```
 
 On macOS, PyInstaller ad-hoc signs local builds and `package` smoke-tests the frozen runtime
-before creating the DMG. For a distributable Developer ID build, first store a `notarytool`
-profile in Keychain, then run:
+before creating the DMG. The packaging command removes the unpackaged app from `dist/` after
+the DMG succeeds so macOS cannot register two app bundles with the same identifier and attach
+Screen Recording permission to the wrong copy. Run `build` instead when you explicitly need
+the unpackaged app. For a distributable Developer ID build, first store a `notarytool` profile
+in Keychain, then run:
 
 ```sh
 MACOS_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
