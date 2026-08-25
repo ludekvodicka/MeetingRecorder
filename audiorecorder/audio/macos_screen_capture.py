@@ -146,18 +146,6 @@ def _sample_buffer_to_array(sample_buffer):
     )
 
 
-def screen_capture_permission_granted():
-    import Quartz
-
-    return bool(Quartz.CGPreflightScreenCaptureAccess())
-
-
-def request_screen_capture_permission():
-    import Quartz
-
-    return bool(Quartz.CGRequestScreenCaptureAccess())
-
-
 def _stream_output_class():
     """Create the Objective-C delegate class once for the lifetime of the process."""
     global _STREAM_OUTPUT_CLASS
@@ -272,12 +260,6 @@ class ScreenCaptureAudioStream:
             raise RuntimeError(f"Could not attach system-audio output: {_error_text(error)}")
 
     def start(self):
-        if not screen_capture_permission_granted():
-            request_screen_capture_permission()
-            raise RuntimeError(
-                "Screen & System Audio Recording permission is required. Enable Meeting "
-                "Recorder in System Settings > Privacy & Security, then restart the app."
-            )
         self._build()
         self._running = True
         try:

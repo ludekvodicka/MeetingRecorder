@@ -316,18 +316,39 @@ def test_stop_finalizes_paths_even_when_native_stream_cleanup_fails():
     assert backend._system_stream is None
 
 
-def test_missing_screen_capture_permission_is_requested(monkeypatch):
-    requested = []
+def test_start_builds_and_starts_screen_capturekit(monkeypatch):
+    built = []
+    started = []
     stream = native.ScreenCaptureAudioStream(lambda data: None)
-    monkeypatch.setattr(native, "screen_capture_permission_granted", lambda: False)
+
+    def build():
+        built.append(True)
+        stream._stream = SimpleNamespace(startCaptureWithCompletionHandler_=lambda _: None)
+
+    monkeypatch.setattr(stream, "_build", build)
     monkeypatch.setattr(
-        native, "request_screen_capture_permission", lambda: requested.append(True) or False
+        native,
+        "_await_action",
+        lambda invoke, operation: started.append(operation),
     )
 
-    with pytest.raises(RuntimeError, match="Privacy & Security"):
-        stream.start()
+    stream.start()
 
-    assert requested == [True]
+    assert built == [True]
+    assert started == ["start system-audio capture"]
+    assert stream._running
+
+
+def test_authoritative_screen_capturekit_error_is_preserved(monkeypatch):
+    stream = native.ScreenCaptureAudioStream(lambda data: None)
+
+    def fail_build():
+        raise RuntimeError("ScreenCaptureKit denied capture")
+
+    monkeypatch.setattr(stream, "_build", fail_build)
+
+    with pytest.raises(RuntimeError, match="ScreenCaptureKit denied capture"):
+        stream.start()
 
 
 def test_unexpected_native_stop_is_reported_once():
