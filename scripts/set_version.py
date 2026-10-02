@@ -3,7 +3,7 @@
     python scripts/set_version.py 0.2.0
 
 Rewrites the single assignment in audiorecorder/version.py, which pyproject.toml, the
-window title, the update check and the release workflow all read. Nothing else stores a
+window title, the updater and the release workflow all read. Nothing else stores a
 version, so there is nothing else to keep in step.
 """
 

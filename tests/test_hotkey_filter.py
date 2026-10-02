@@ -99,7 +99,6 @@ class TestTheFilterDoesNotOutliveItsWindow:
         from audiorecorder.ui.main_window import MainWindow
 
         monkeypatch.setattr(mw, "save_config", lambda config: None)
-        monkeypatch.setattr(MainWindow, "_start_update_check", lambda self: None)
         window = MainWindow({"output_dir": str(tmp_path), "rts_translate": False,
                              "language": "en", "translation_target": "cs"})
         window._dictation_active = True

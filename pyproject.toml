@@ -50,7 +50,7 @@ dependencies = [
 dev = [
     "ruff>=0.6",
     "pytest>=8.0",
-    "pyinstaller>=6.0",
+    "pyinstaller>=6.10",
 ]
 
 [project.urls]
@@ -70,7 +70,7 @@ include = ["audiorecorder*"]
 audiorecorder = ["assets/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "audiorecorder/shared"]
 
 [tool.ruff]
 line-length = 100

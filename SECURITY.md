@@ -30,8 +30,16 @@ Worth knowing when judging the impact of a finding:
   can therefore have it run. That is the same trust model as typing `claude` in a terminal.
 - **The summary prompt is a setting**, so a user who edits their own settings file changes what
   the local Claude CLI is asked to do. It is not reachable by anything outside the machine.
-- **The update check** performs one unauthenticated GET against the GitHub Releases API at
-  startup and only ever displays a version string. It never downloads or executes anything.
+- **Self-update** asks the GitHub Releases API, without credentials, for the latest release of
+  this repository 45 seconds after start and every two hours. On Windows and in the Linux
+  AppImage it then downloads the new build from that same release, only from the repository's
+  own release download URLs on `github.com`, and checks its SHA-256 against the
+  `SHA256SUMS.txt` published with it. A download that does not match is deleted and never run.
+  The verified build replaces the running file only after the application has exited, through
+  the new build itself started in helper mode. Release notes are shown as plain text.
+- **What the check protects against**: a corrupted or truncated download. It does not protect
+  against a compromised release: the checksums come from the same release as the build, and the
+  builds are unsigned (below).
 
 ## Builds are unsigned
 

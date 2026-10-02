@@ -113,7 +113,6 @@ def window(app, tmp_path, monkeypatch):
     monkeypatch.setattr(mw, "SubtitleEngine", FakeEngine)
     # Never the real one: it writes the user's live configuration file.
     monkeypatch.setattr(mw, "save_config", lambda config: None)
-    monkeypatch.setattr(MainWindow, "_start_update_check", lambda self: None)
     monkeypatch.setattr(mw.secrets, "get_api_key", lambda: "key")
     monkeypatch.setattr(mw, "DictationEngine", FakeDictation)
 

@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import QApplication
 from audiorecorder.config import load_config, save_config
 from audiorecorder.single_instance import SingleInstance
 from audiorecorder.ui.main_window import MainWindow
+from audiorecorder.ui.update_indicator import UpdateIndicator
+from audiorecorder.updates import AppUpdates
 
 
 def asset_path(name):
@@ -59,9 +61,18 @@ def main():
     if not instance.take_ownership():
         return
 
+    updates = AppUpdates.create(app)
     window = MainWindow(cfg)
+    updates.set_busy_check(window.busy_reason)
+    window.statusBar().addPermanentWidget(UpdateIndicator(updates, window))
+    # A ready update installs on a normal quit, but not while the OS session ends: the
+    # helper would race the logoff and could leave a half-swapped program behind.
+    session_ending = []
+    app.commitDataRequest.connect(lambda _manager: session_ending.append(True))
+    app.aboutToQuit.connect(lambda: updates.quit(bool(session_ending)))
     instance.another_instance_started.connect(lambda: _raise(window))
     _raise(window)
+    updates.start()
 
     sys.exit(app.exec())
 

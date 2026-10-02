@@ -74,7 +74,7 @@ class TestSilentFailuresNowSpeak:
     """A dictation that produces nothing must say so rather than appear to have worked.
 
     The handler is exercised against a stub rather than a real window: building one starts
-    an update check and a compositor-backed overlay, neither of which belongs in a unit test.
+    a compositor-backed overlay, which does not belong in a unit test.
     """
 
     def handle(self, state):

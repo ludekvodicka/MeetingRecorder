@@ -102,8 +102,8 @@ Download the build for your platform from
 same release before running it:
 
 ```sh
-sha256sum Audio-Recorder-0.1.0-x64.exe                      # Linux, macOS, Git Bash
-certutil -hashfile Audio-Recorder-0.1.0-x64.exe SHA256      # Windows
+sha256sum Meeting-Recorder-0.3.0-x64.exe                    # Linux, macOS, Git Bash
+certutil -hashfile Meeting-Recorder-0.3.0-x64.exe SHA256    # Windows
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
@@ -114,8 +114,27 @@ certutil -hashfile Audio-Recorder-0.1.0-x64.exe SHA256      # Windows
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 
-The application does not update itself. It checks the Releases page once at startup and tells
-you in the status bar when something newer exists.
+## Updates
+
+The application checks the Releases page 45 seconds after it starts and every two hours after
+that. The version in the bottom-right corner of the window turns into the update state; click it
+for the release notes and the **Check now**, **Restart and install** and **View on GitHub**
+buttons.
+
+- **Windows** `.exe`, also when run from the portable `.zip`, and the **Linux AppImage**
+  download a newer release in the background and check it against `SHA256SUMS.txt` of the same
+  release. Nothing is installed until you click **Restart and install**, or until you next quit
+  the application normally. The file is replaced where it is and keeps its name, so a shortcut
+  to it keeps working; the window title shows the new version.
+- **macOS** and the **Linux `.tar.gz`** only tell you that a newer release exists and link to
+  it. The same applies when the folder holding the program is not writable.
+- **From source** the update check is off.
+
+An update never installs while a recording is running or being saved, while a transcription
+or cleanup runs or while dictation is on, and never while the computer is shutting down or
+logging off. If an update fails, the status bar says so and the program you had stays in place.
+Should a shutdown cut an update off halfway, the previous program is left next to it with
+`.old` appended to its name: rename it back to restore it.
 
 ## Set it up
 
