@@ -84,9 +84,22 @@ class UpdateProcesses:
                     waiting.discard(pid)
                 except PermissionError:
                     pass
+                else:
+                    if UpdateProcesses._is_zombie(pid):
+                        waiting.discard(pid)
             if not waiting:
                 return True
             if time.monotonic() >= deadline:
                 return False
             time.sleep(UpdateProcesses.poll_seconds)
         return True
+
+    @staticmethod
+    def _is_zombie(pid: int) -> bool:
+        """An exited process whose parent has not reaped it yet; Linux only, no /proc elsewhere."""
+        try:
+            stat_line = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            return False
+        # The state follows the command name, which is in parentheses and may contain spaces.
+        return stat_line.rpartition(")")[2].split()[:1] == ["Z"]

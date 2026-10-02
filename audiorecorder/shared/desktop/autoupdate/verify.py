@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,6 +85,8 @@ class UpdateVerify:
             staged = UpdateVerify.copy(built, root / "s" / built.name)
             holder = subprocess.Popen(
                 [sys.executable, "-c", f"import time; time.sleep({UpdateVerify.holder_seconds})"])
+            # Reaped while the helper waits: an unreaped exited child still looks alive on POSIX.
+            threading.Thread(target=holder.wait, daemon=True).start()
             try:
                 outcome = UpdateVerify.run(staged, UpdateVerify.manifest(
                     root, "file", staged, target, (holder.pid,), 60, None))

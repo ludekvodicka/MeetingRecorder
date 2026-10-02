@@ -79,3 +79,20 @@ def test_posix_spawn_starts_a_new_session(monkeypatch, tmp_path):
     assert calls[0]["argv"] == ["demo", "--x"]
     assert calls[0]["start_new_session"] is True
     assert calls[0]["stdin"] == subprocess.DEVNULL
+
+
+@pytest.mark.parametrize(("stat_line", "zombie"), [
+    ("4242 (my app (2)) Z 1 4242 4242 0 -1", True),
+    ("4242 (my app) S 1 4242 4242 0 -1", False),
+])
+def test_zombie_state_is_read_after_the_command_name(monkeypatch, stat_line, zombie):
+    monkeypatch.setattr(processes.Path, "read_text", lambda _self, *_args, **_kw: stat_line)
+    assert UpdateProcesses._is_zombie(4242) is zombie
+
+
+def test_no_proc_entry_is_not_a_zombie(monkeypatch):
+    def missing(_self, *_args, **_kw):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(processes.Path, "read_text", missing)
+    assert UpdateProcesses._is_zombie(4242) is False

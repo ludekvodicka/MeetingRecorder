@@ -2,6 +2,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -80,6 +81,8 @@ def test_unreadable_manifest_exits_2_and_writes_a_result_beside_it(tmp_path):
 
 def test_file_swap_on_windows_renames_and_cleans_up(tmp_path, monkeypatch):
     monkeypatch.setattr(helper_module.sys, "platform", "win32")
+    # The one global sys.platform is patched, so the real wait would call another OS's API.
+    monkeypatch.setattr(UpdateProcesses, "wait_for_exit", staticmethod(lambda _pids, _t: True))
     path = file_manifest(tmp_path)
     assert run(path) == (0, UpdateOutcome(True, "1.2.0", None))
     assert sorted(entry.name for entry in (tmp_path / "t").iterdir()) == ["Demo.exe"]
@@ -89,6 +92,8 @@ def test_file_swap_on_windows_renames_and_cleans_up(tmp_path, monkeypatch):
 
 def test_file_swap_on_linux_replaces_atomically(tmp_path, monkeypatch):
     monkeypatch.setattr(helper_module.sys, "platform", "linux")
+    # The one global sys.platform is patched, so the real wait would call another OS's API.
+    monkeypatch.setattr(UpdateProcesses, "wait_for_exit", staticmethod(lambda _pids, _t: True))
     path = file_manifest(tmp_path)
     assert run(path)[0] == 0
     target = tmp_path / "t" / "Demo.exe"
@@ -110,6 +115,8 @@ def test_folder_swap(tmp_path):
 
 def test_failed_second_rename_rolls_the_file_back(tmp_path, monkeypatch):
     monkeypatch.setattr(helper_module.sys, "platform", "win32")
+    # The one global sys.platform is patched, so the real wait would call another OS's API.
+    monkeypatch.setattr(UpdateProcesses, "wait_for_exit", staticmethod(lambda _pids, _t: True))
     path = file_manifest(tmp_path, swap_seconds=0.3)
     new = tmp_path / "t" / "Demo.exe.new"
     original = Path.replace
@@ -223,6 +230,8 @@ def test_no_relaunch_when_not_asked(tmp_path, spawned):
 
 def test_macos_raises_and_keeps_the_target(tmp_path, monkeypatch):
     monkeypatch.setattr(helper_module.sys, "platform", "darwin")
+    # The one global sys.platform is patched, so the real wait would call another OS's API.
+    monkeypatch.setattr(UpdateProcesses, "wait_for_exit", staticmethod(lambda _pids, _t: True))
     path = file_manifest(tmp_path)
     with pytest.raises(ValueError, match="not supported on darwin"):
         UpdateHelper.swap(UpdateManifest.read(path))
@@ -262,6 +271,8 @@ def test_real_helper_process_waits_swaps_and_relaunches(tmp_path):
     target.write_text(target.read_text().replace("relaunched", "old build"))
     source = relaunch_script(tmp_path, "app")
     app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1)"])
+    # Reaped while the helper waits: an exited child that nobody reaps still looks alive on POSIX.
+    threading.Thread(target=app.wait, daemon=True).start()
     path = write_manifest(tmp_path, kind="file", source=source, target=target, executable=None,
                           wait_pids=(app.pid,), wait_seconds=30.0, swap_seconds=10.0,
                           relaunch=True, relaunch_args=("--settings",))
