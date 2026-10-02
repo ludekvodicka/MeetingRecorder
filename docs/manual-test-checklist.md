@@ -72,6 +72,13 @@ and say in the release notes what was not exercised.
 - [ ] Clear the API key from the keyring, restart, and confirm Transcribe explains what to do
       rather than failing obscurely
 - [ ] Enter the key in Settings, confirm it is accepted and survives a restart
+- [ ] Self-update: copy the previous release's `.exe` into a writable folder and start it. About
+      45 seconds later the status bar shows the new version downloading, then ready
+- [ ] The Update dialog shows the new release notes as text; View on GitHub opens the release page
+- [ ] Restart and install (or quit normally): the same file name now holds the new version, its
+      SHA-256 matches the line in the new `SHA256SUMS.txt`, the title shows the new version, and
+      `updates/result.json` in the cache folder says installed
+- [ ] Start a recording, then Restart and install: the dialog refuses and names the recording
 
 ### macOS
 
