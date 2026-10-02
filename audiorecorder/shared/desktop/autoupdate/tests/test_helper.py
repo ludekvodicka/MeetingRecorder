@@ -185,6 +185,9 @@ def test_relaunch_argv_cwd_and_environment(tmp_path, monkeypatch):
         calls.append((argv, options))
 
     monkeypatch.setattr(processes.subprocess, "Popen", popen)
+    # A file swap exists only on Windows and Linux; a macOS runner takes the Linux path here.
+    monkeypatch.setattr(helper_module.sys, "platform", "linux")
+    monkeypatch.setattr(UpdateProcesses, "wait_for_exit", staticmethod(lambda _pids, _t: True))
     path = file_manifest(tmp_path, relaunch=True, relaunch_args=("--settings", "a b"))
     assert run(path)[0] == 0
     target = tmp_path / "t" / "Demo.exe"
@@ -223,7 +226,10 @@ def test_failed_swap_relaunches_the_old_build_after_writing_the_result(tmp_path,
     assert (tmp_path / "Programs" / "DemoApp" / "DemoApp.exe").read_bytes() == b"old"
 
 
-def test_no_relaunch_when_not_asked(tmp_path, spawned):
+def test_no_relaunch_when_not_asked(tmp_path, spawned, monkeypatch):
+    # A file swap exists only on Windows and Linux; a macOS runner takes the Linux path here.
+    monkeypatch.setattr(helper_module.sys, "platform", "linux")
+    monkeypatch.setattr(UpdateProcesses, "wait_for_exit", staticmethod(lambda _pids, _t: True))
     assert run(file_manifest(tmp_path))[0] == 0
     assert spawned == []
 

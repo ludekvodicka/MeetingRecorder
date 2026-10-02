@@ -43,7 +43,9 @@ def test_unsupported_platform_raises(monkeypatch):
 
 def test_spawn_detached_starts_a_real_program(tmp_path):
     marker = tmp_path / "marker.txt"
-    code = f"open({str(marker)!r}, 'w').write('started')"
+    # Written to a side file and renamed, so the test never reads a created but still empty file.
+    code = (f"import os; open({str(marker) + '.part'!r}, 'w').write('started'); "
+            f"os.replace({str(marker) + '.part'!r}, {str(marker)!r})")
     UpdateProcesses.spawn_detached([sys.executable, "-c", code], cwd=tmp_path)
     deadline = time.monotonic() + 15
     while not marker.is_file() and time.monotonic() < deadline:
