@@ -78,3 +78,26 @@ The next start removes downloads that are not newer than the running version and
 - The first release with this updater (0.3.0) is installed by hand; only the release after it
   proves the update path on a real installation.
 - No setting turns update checks off, there is no snooze and no automatic restart.
+
+## Release dependency maintenance
+
+Requests defaults to the bundled certifi store. `pyproject.toml` requires certifi 2026.10.19 or newer
+so a release cannot retain the roots removed after the October 2026 CA incident merely because
+another dependency accepts an older certifi. Refresh the build virtual environment before packaging;
+an updated source requirement does not change an already distributed executable.
+
+The updater supplies an explicit certifi-only SSL context to the shared urllib transport.
+From 0.3.3, `audiorecorder/dictation/streaming.py` also supplies that context to websocket-client
+for dictation and live subtitles. Before this change, websocket-client loaded OS roots and
+accepted six affected AAA cross-signed chains on the Windows validation machine even with an
+updated certifi installed. System-only roots and `WEBSOCKET_CLIENT_CA_BUNDLE` do not extend the
+streaming context. Certificate and hostname verification remain required; a missing bundle fails
+before the socket thread starts. Requests retains its existing environment override behavior,
+so an installation using `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` needs separate validation.
+
+Release validation must check each client's effective context, all twelve affected chains and
+valid controls, including Soniox and GitHub. Check the packaged runtime as well as the source
+environment: bundle equality alone did not detect the original WebSocket problem. The Windows
+0.3.3 source passed 501 tests (one platform-specific skip) and 54 live TLS checks on 2026-10-21.
+Native macOS/Linux packaging and real user installations need their own verification. A local
+candidate and a successful helper swap do not publish a release or update a user's recorder.

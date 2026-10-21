@@ -46,6 +46,10 @@ and say in the release notes what was not exercised.
       dictation used to switch itself off the moment it started
 - [ ] The clipboard content you had before the dictation is back afterwards
 - [ ] Ctrl+Shift+Space dictates and translates instead
+- [ ] With Dictation on, type fast and move the mouse in another application for one
+      minute: typing and mouse movement do not lag
+- [ ] Switch Dictation off and on, then hold Ctrl+Space, speak and release: dictation
+      starts again and the text is pasted where the caret is
 - [ ] Dictate once with the language set to Czech, once to English and once to Auto-detect.
       Auto sends no language hint at all, and a wrong hint makes Soniox reject the stream
 - [ ] Tap Ctrl+Space instead of holding it: the status bar says it was too short

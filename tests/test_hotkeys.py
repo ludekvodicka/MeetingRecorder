@@ -7,6 +7,7 @@ from audiorecorder.dictation.hotkeys import (
     PushToTalkStateMachine,
     held_modifiers,
     normalize_key,
+    normalize_raw_key,
 )
 
 
@@ -47,6 +48,22 @@ class TestNormalizeKey:
 
     def test_character_keys_are_other(self):
         assert normalize_key(FakeCharKey()) == "other"
+
+
+class TestNormalizeRawKey:
+    @pytest.mark.parametrize("vkey,flags,expected", [
+        (0x11, 0, (True, "ctrl")), (0x11, 1, (False, "ctrl")),
+        (0x11, 2, (True, "ctrl")), (0x11, 3, (False, "ctrl")),
+        (0xA2, 0, (True, "ctrl")), (0xA2, 1, (False, "ctrl")),
+        (0xA3, 2, (True, "ctrl")), (0xA3, 3, (False, "ctrl")),
+        (0x10, 0, (True, "shift")), (0x10, 1, (False, "shift")),
+        (0xA0, 0, (True, "shift")), (0xA0, 1, (False, "shift")),
+        (0xA1, 0, (True, "shift")), (0xA1, 1, (False, "shift")),
+        (0x20, 0, (True, "space")), (0x20, 1, (False, "space")),
+        (0x41, 0, (True, "other")), (0x41, 1, (False, "other")),
+    ])
+    def test_reports_map_to_the_machine_vocabulary(self, vkey, flags, expected):
+        assert normalize_raw_key(vkey, flags) == expected
 
 
 class TestPushToTalk:

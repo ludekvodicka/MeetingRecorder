@@ -1,9 +1,11 @@
 import itertools
 import json
 import logging
+import ssl
 import threading
 import time
 
+import certifi
 import websocket
 
 SONIOX_WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
@@ -183,7 +185,10 @@ class SonioxStreamingSession:
             on_error=self._on_error,
             on_close=self._on_close,
         )
-        self._thread = threading.Thread(target=self.ws.run_forever, daemon=True)
+        # OS roots can still trust revoked chains that the bundled store has removed.
+        context = ssl.create_default_context(cafile=certifi.where())
+        self._thread = threading.Thread(
+            target=self.ws.run_forever, kwargs={"sslopt": {"context": context}}, daemon=True)
         self._thread.start()
 
         if not self._opened.wait(timeout=timeout):
