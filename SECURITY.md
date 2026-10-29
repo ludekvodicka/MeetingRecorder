@@ -24,10 +24,10 @@ Worth knowing when judging the impact of a finding:
   They are not encrypted, and anyone who can read that directory can read them.
 - **Audio leaves the machine only on an explicit action**: the Transcribe button uploads one
   recording to Soniox, and dictation streams the microphone to Soniox while the hotkey is held.
-- **The Cleanup button spawns the local `claude` executable** with the transcript directory as
-  its working directory, and runs it with permission prompts disabled so it can read and write
-  there unattended. Anyone able to plant an executable named `claude` earlier on the user's PATH
-  can therefore have it run. That is the same trust model as typing `claude` in a terminal.
+- **The Cleanup button spawns the local `claude` executable** with tools and MCP servers disabled.
+  The transcript is passed as untrusted input, and the application writes the returned summary.
+  Anyone able to plant an executable named `claude` earlier on the user's PATH can still have it
+  run. That is the same trust model as typing `claude` in a terminal.
 - **The summary prompt is a setting**, so a user who edits their own settings file changes what
   the local Claude CLI is asked to do. It is not reachable by anything outside the machine.
 - **Update notices** ask the GitHub Releases API, without credentials, for this repository's
