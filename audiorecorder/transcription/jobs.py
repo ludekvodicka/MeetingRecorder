@@ -70,19 +70,96 @@ class TranscriptionJob:
         stat = self.audio.stat()
         identity = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
         if self.path.exists():
-            data = json.loads(self.path.read_text(encoding='utf-8'))
-            if data.get('audio') != identity or data.get('options') != options:
+            data = read_checkpoint(self.path)
+            if data['audio'] != identity or data['options'] != options:
                 raise RuntimeError(
                     'A saved transcription job has different audio or settings. '
                     'Restore the settings or review the .transcription.json before retrying.')
-            if data.get('stage', '').startswith('submitting_'):
+            if data['stage'].startswith('submitting_'):
                 raise RuntimeError(
                     'The previous request may have reached Soniox before it was saved. '
                     'Check Soniox before retrying to avoid a duplicate paid job. '
                     'The .transcription.json file records the uncertain stage.')
             return data
-        return {'version': 1, 'audio': identity, 'options': options, 'stage': 'new'}
+        data = {'version': 1, 'audio': identity, 'options': options, 'stage': 'new'}
+        validate_checkpoint(data)
+        return data
 
     def save(self, data, **changes):
+        updated = {**data, **changes}
+        validate_checkpoint(updated)
+        atomic_write(self.path, json.dumps(updated, indent=2) + '\n')
         data.update(changes)
-        atomic_write(self.path, json.dumps(data, indent=2) + '\n')
+
+
+class CheckpointError(RuntimeError):
+    """The checkpoint cannot safely identify a resumable provider job."""
+
+
+def validate_checkpoint(data):
+    stages = {
+        'new', 'uploaded', 'submitting_original_id', 'polling_original_id',
+        'submitting_translation_id', 'polling_translation_id', 'completed',
+    }
+    invalid = CheckpointError(
+        'Saved job state is invalid; review the .transcription.json before retrying.')
+    if not isinstance(data, dict) or type(data.get('version')) is not int or data['version'] != 1:
+        raise invalid
+    stage = data.get('stage')
+    if not isinstance(stage, str) or stage not in stages:
+        raise invalid
+    audio, options = data.get('audio'), data.get('options')
+    if not isinstance(audio, dict) or any(
+        type(audio.get(key)) is not int for key in ('size', 'mtime_ns')
+    ):
+        raise invalid
+    if not isinstance(options, dict):
+        raise invalid
+    if (
+        not isinstance(options.get('primary_language'), str) or not options['primary_language']
+        or type(options.get('enable_translation')) is not bool
+        or not isinstance(options.get('language_hints'), list)
+        or any(not isinstance(hint, str) or not hint for hint in options['language_hints'])
+    ):
+        raise invalid
+    for key in ('file_id', 'original_id', 'translation_id'):
+        if key in data and (not isinstance(data[key], str) or not data[key].strip()):
+            raise invalid
+    if stage != 'new' and not data.get('file_id'):
+        raise invalid
+    if stage in {'polling_original_id', 'submitting_translation_id',
+                 'polling_translation_id', 'completed'} and not data.get('original_id'):
+        raise invalid
+    if stage == 'polling_translation_id' and not data.get('translation_id'):
+        raise invalid
+    if ('translation' in stage or 'translation_id' in data) and not options['enable_translation']:
+        raise invalid
+    if ('original_id' in data and 'file_id' not in data) or (
+        'translation_id' in data and 'original_id' not in data
+    ):
+        raise invalid
+
+
+def read_checkpoint(path):
+    try:
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError) as error:
+        raise CheckpointError(
+            'Saved job state is unreadable; '
+            'review the .transcription.json before retrying.') from error
+    validate_checkpoint(data)
+    return data
+
+
+def checkpoint_status(audio_path):
+    """Read-only presentation of the same validated checkpoint used by recovery."""
+    path = TranscriptionJob(audio_path).path
+    if not path.exists():
+        return ''
+    try:
+        data = read_checkpoint(path)
+    except CheckpointError:
+        return 'Job state unreadable — review before retrying'
+    if data['stage'].startswith('submitting_'):
+        return 'Request status unknown — review before retrying'
+    return 'Saved job — click Resume'

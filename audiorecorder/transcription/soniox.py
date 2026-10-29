@@ -1,18 +1,8 @@
-import os
-import time
+"""Qt signal adapter for the synchronous transcription service."""
 
-import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from audiorecorder.transcription.jobs import TranscriptionJob, atomic_write
-from audiorecorder.transcription.markdown import (
-    detect_dominant_language,
-    language_name,
-    render_transcript,
-    render_transcript_with_translation,
-)
-
-API_BASE = "https://api.soniox.com/v1"
+from audiorecorder.transcription.service import TranscriptionOptions, TranscriptionService
 
 
 class SonioxWorker(QObject):
@@ -21,138 +11,17 @@ class SonioxWorker(QObject):
     error = pyqtSignal(str)
 
     def __init__(self, api_key, audio_path, language_hints=None,
-                 primary_language="en", enable_translation=False, output_path=None):
+                 primary_language="en", enable_translation=False, output_path=None, options=None):
         super().__init__()
-        self.api_key = api_key
-        self.audio_path = audio_path
-        self.language_hints = language_hints or []
-        self.primary_language = primary_language
-        self.enable_translation = enable_translation
-        self.output_path = output_path
+        options = options or TranscriptionOptions(
+            primary_language, tuple(language_hints or ()), enable_translation)
+        self.service = TranscriptionService(
+            api_key, audio_path, options, output_path=output_path, progress=self.progress.emit)
 
     def run(self):
         try:
-            with TranscriptionJob(self.audio_path).locked() as job:
-                output_path = self.output_path or os.path.splitext(self.audio_path)[0] + ".md"
-                if os.path.exists(output_path):
-                    raise RuntimeError("Transcript already exists; existing output was preserved")
-                options = {
-                    "language_hints": self.language_hints,
-                    "primary_language": self.primary_language,
-                    "enable_translation": self.enable_translation,
-                }
-                state = job.load(options)
-                file_id = state.get("file_id")
-                if not file_id:
-                    self.progress.emit("Uploading audio...")
-                    file_id = self._upload_file()
-                    job.save(state, file_id=file_id, stage="uploaded")
-
-                def transcribe(key, **kwargs):
-                    transcription_id = state.get(key)
-                    if not transcription_id:
-                        # A crash/timeout during POST is ambiguous. Persist intent first;
-                        # recovery must never silently submit the same paid job twice.
-                        job.save(state, stage=f"submitting_{key}")
-                        transcription_id = self._create_transcription(file_id, **kwargs)
-                        job.save(state, **{key: transcription_id}, stage=f"polling_{key}")
-                    else:
-                        self.progress.emit("Resuming saved transcription...")
-                    self._poll_status(transcription_id)
-                    self.progress.emit("Fetching transcript...")
-                    tokens = self._get_transcript(transcription_id)
-                    if not any(t.get("text", "").strip() for t in tokens):
-                        raise RuntimeError("Soniox returned an empty transcript")
-                    return tokens
-
-                self.progress.emit("Transcribing...")
-                tokens = transcribe("original_id", translate=False)
-                detected_lang = detect_dominant_language(tokens, fallback=self.primary_language)
-                target = self.primary_language
-                if self.enable_translation and detected_lang != target:
-                    self.progress.emit(f"Translating to {language_name(target)}...")
-                    translated = transcribe("translation_id", translate=True, target=target)
-                    document = render_transcript_with_translation(
-                        tokens, translated, source_name=os.path.basename(self.audio_path),
-                        original_lang=detected_lang, translation_lang=target,
-                    )
-                else:
-                    document = render_transcript(
-                        tokens, source_name=os.path.basename(self.audio_path),
-                        language=detected_lang,
-                    )
-                self.progress.emit("Saving transcript...")
-                atomic_write(output_path, document, replace=False)
-                job.save(state, stage="completed")
-            self.progress.emit("Done")
-            self.completed.emit(output_path)
-        except Exception as e:
-            self.error.emit(str(e))
-
-    def _upload_file(self):
-        with open(self.audio_path, "rb") as f:
-            r = requests.post(
-                f"{API_BASE}/files",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                files={"file": f},
-                timeout=300,
-            )
-        r.raise_for_status()
-        return r.json()["id"]
-
-    def _create_transcription(self, file_id, translate=False, target="cs"):
-        body = {
-            "model": "stt-async-v4",
-            "file_id": file_id,
-            "enable_language_identification": True,
-            "enable_speaker_diarization": True,
-        }
-        # No hints at all means "identify it yourself", which is what the auto setting wants.
-        if self.language_hints:
-            body["language_hints"] = self.language_hints
-        if translate:
-            body["translation"] = {
-                "type": "one_way",
-                "target_language": target,
-            }
-
-        r = requests.post(
-            f"{API_BASE}/transcriptions",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-            timeout=30,
-        )
-        r.raise_for_status()
-        return r.json()["id"]
-
-    def _poll_status(self, transcription_id, timeout=1800):
-        start = time.time()
-        while True:
-            r = requests.get(
-                f"{API_BASE}/transcriptions/{transcription_id}",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=30,
-            )
-            r.raise_for_status()
-            data = r.json()
-            status = data.get("status")
-            self.progress.emit(f"Transcribing... ({status})")
-            if status == "completed":
-                return
-            if status == "error":
-                raise RuntimeError(f"Transcription failed: {data}")
-            if time.time() - start > timeout:
-                raise TimeoutError("Transcription timed out")
-            time.sleep(3)
-
-    def _get_transcript(self, transcription_id):
-        r = requests.get(
-            f"{API_BASE}/transcriptions/{transcription_id}/transcript",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=30,
-        )
-        r.raise_for_status()
-        return r.json().get("tokens", [])
+            result = self.service.run()
+        except Exception as error:
+            self.error.emit(str(error))
+        else:
+            self.completed.emit(result)

@@ -3,7 +3,7 @@ import json
 import pytest
 
 from audiorecorder.transcription import cli
-from audiorecorder.transcription.soniox import SonioxWorker
+from audiorecorder.transcription.client import SonioxClient
 
 
 @pytest.fixture
@@ -17,10 +17,10 @@ def audio(tmp_path):
 def provider(monkeypatch):
     monkeypatch.setattr(cli, "load_config", lambda: {"language": "en"})
     monkeypatch.setattr(cli.secrets, "get_api_key_headless", lambda: "test-key")
-    monkeypatch.setattr(SonioxWorker, "_upload_file", lambda self: "file")
-    monkeypatch.setattr(SonioxWorker, "_create_transcription", lambda self, file_id, **kw: "job")
-    monkeypatch.setattr(SonioxWorker, "_poll_status", lambda self, job: None)
-    monkeypatch.setattr(SonioxWorker, "_get_transcript", lambda self, job: [
+    monkeypatch.setattr(SonioxClient, "upload_file", lambda self, audio_path: "file")
+    monkeypatch.setattr(SonioxClient, "create_transcription", lambda self, file_id, **kw: "job")
+    monkeypatch.setattr(SonioxClient, "poll_status", lambda self, job: None)
+    monkeypatch.setattr(SonioxClient, "get_transcript", lambda self, job: [
         {"text": "Hello", "speaker": 1, "start_ms": 0, "language": "en"},
     ])
 
@@ -50,21 +50,21 @@ def test_success(audio, provider, capsys):
 
 
 def test_empty_response_not_published(audio, provider, monkeypatch):
-    monkeypatch.setattr(SonioxWorker, "_get_transcript", lambda self, job: [])
+    monkeypatch.setattr(SonioxClient, "get_transcript", lambda self, job: [])
     assert cli.main([str(audio)]) == 1
     assert not audio.with_suffix(".md").exists()
 
 
 def test_failure_redacts_provider_error(audio, provider, monkeypatch, capsys):
-    def fail(self):
+    def fail(self, audio_path):
         raise RuntimeError("test-key private provider content")
-    monkeypatch.setattr(SonioxWorker, "_upload_file", fail)
+    monkeypatch.setattr(SonioxClient, "upload_file", fail)
     assert cli.main([str(audio), "--json"]) == 1
     assert "test-key" not in capsys.readouterr().err
     assert not audio.with_suffix(".md").exists()
 
 
-def test_busy(audio):
+def test_busy(audio, provider):
     audio.with_suffix(".md.transcribing").touch()
     assert cli.main([str(audio)]) == 1
     assert audio.with_suffix(".md.transcribing").exists()
@@ -84,7 +84,8 @@ def test_credential_failure_releases_lock_before_upload(audio, monkeypatch, caps
     def unavailable():
         raise cli.secrets.SecretsError("Credential lookup timed out")
     monkeypatch.setattr(cli.secrets, "get_api_key_headless", unavailable)
-    monkeypatch.setattr(cli, "SonioxWorker", lambda **kw: pytest.fail("upload attempted"))
+    monkeypatch.setattr(
+        cli, "TranscriptionService", lambda *args, **kw: pytest.fail("upload attempted"))
     assert cli.main([str(audio), "--json"]) == 1
     assert json.loads(capsys.readouterr().err)["message"] == "Credential lookup timed out"
     assert not audio.with_suffix(".md.transcribing").exists()
@@ -95,6 +96,6 @@ def test_no_clobber_race(audio, provider, monkeypatch):
     def race(self, job):
         audio.with_suffix(".md").write_text("GUI result")
         return [{"text": "CLI result"}]
-    monkeypatch.setattr(SonioxWorker, "_get_transcript", race)
+    monkeypatch.setattr(SonioxClient, "get_transcript", race)
     assert cli.main([str(audio)]) == 1
     assert audio.with_suffix(".md").read_text() == "GUI result"

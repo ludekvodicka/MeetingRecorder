@@ -7,7 +7,7 @@ from pathlib import Path
 
 from audiorecorder import secrets
 from audiorecorder.config import load_config
-from audiorecorder.transcription.soniox import SonioxWorker
+from audiorecorder.transcription.service import TranscriptionOptions, TranscriptionService
 from audiorecorder.version import __version__
 
 
@@ -48,18 +48,16 @@ def main(argv=None):
         key = secrets.get_api_key_headless()
         if not key:
             return result("error", 1, "Soniox key missing; configure Keychain or SONIOX_API_KEY")
-        lang = args.language or config.get("language", "en")
-        worker = SonioxWorker(
-            api_key=key, audio_path=str(audio), language_hints=[] if lang == "auto" else [lang],
-            primary_language=lang, enable_translation=False,
+        options = TranscriptionOptions.from_config(
+            config, language=args.language, translate=False)
+        service = TranscriptionService(
+            key, str(audio), options,
+            progress=lambda message: print(message, file=sys.stderr),
         )
-        errors, completed = [], []
-        worker.error.connect(errors.append)
-        worker.completed.connect(completed.append)
-        worker.progress.connect(lambda message: print(message, file=sys.stderr))
-        worker.run()
-        if errors or not completed or not output.exists() or not output.stat().st_size:
-            # Provider exceptions may include sensitive response data. Keep diagnostics bounded.
+        try:
+            service.run()
+        except Exception:
+            # Provider exceptions may include sensitive response data.
             return result("error", 1, "Soniox transcription failed; no output published")
         return result("completed")
     except secrets.SecretsError as exc:
