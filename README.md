@@ -42,6 +42,10 @@ Duplicate actions and move/delete are disabled for queued and active recordings.
 waits for the queue and its threads to finish. Checkpoint sidecars follow audio when moved,
 renamed or deleted; lock files remain at their original paths.
 
+Recording moves, renames and deletes share this lock and preserve sidecars.
+See [batch transcription architecture](docs/architecture/batch-transcription.md) for ownership
+and recovery contracts.
+
 Exit codes: `0` completed/skipped/dry-run, `1` operational failure, `2` invalid input,
 `130` interrupted. With `--json`, the final result contains `status`, `audio`, `transcript`
 and an optional `message`. Success results go to stdout, errors and progress to stderr.

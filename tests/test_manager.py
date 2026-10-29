@@ -103,6 +103,108 @@ def test_scan_shows_recoverable_or_uncertain_job(tmp_path, stage, label):
     import json
 
     make_recording(tmp_path, 'meeting')
-    (tmp_path / 'meeting.transcription.json').write_text(json.dumps({'stage': stage}))
+    audio = tmp_path / 'meeting.m4a'
+    (tmp_path / 'meeting.transcription.json').write_text(json.dumps({
+        'version': 1, 'stage': stage, 'file_id': 'file', 'original_id': 'job',
+        'audio': {'size': audio.stat().st_size, 'mtime_ns': audio.stat().st_mtime_ns},
+        'options': {'primary_language': 'en', 'language_hints': [], 'enable_translation': False},
+    }))
     recording = RecordingManager(str(tmp_path)).scan()[0]
     assert label in recording.transcription_status
+
+
+@pytest.mark.parametrize('action', ['delete', 'rename', 'move'])
+def test_file_operations_refuse_a_transcription_owned_by_another_worker(tmp_path, action):
+    from audiorecorder.transcription.jobs import TranscriptionJob
+
+    make_recording(tmp_path, 'meeting', transcript=True)
+    audio = tmp_path / 'meeting.m4a'
+    destination = tmp_path / 'destination'
+    destination.mkdir()
+    manager = RecordingManager(str(tmp_path))
+    with TranscriptionJob(audio).locked(), pytest.raises(RuntimeError, match='another process'):
+        if action == 'delete':
+            manager.delete(str(audio))
+        elif action == 'rename':
+            manager.rename(str(audio), 'renamed')
+        else:
+            manager.move(str(audio), str(destination))
+    assert audio.read_bytes() == b'not really audio'
+    assert audio.with_suffix('.md').read_text() == '# Transcript'
+
+
+def test_move_takes_all_sidecars_without_overwriting_an_orphan_destination(tmp_path):
+    from audiorecorder.recordings.manager import SIDECAR_SUFFIXES
+
+    make_recording(tmp_path, 'meeting')
+    audio = tmp_path / 'meeting.m4a'
+    for suffix in SIDECAR_SUFFIXES:
+        audio.with_suffix(suffix).write_text(suffix)
+    destination = tmp_path / 'destination'
+    destination.mkdir()
+    orphan = destination / 'meeting.transcription.json'
+    orphan.write_text('existing recovery state')
+    manager = RecordingManager(str(tmp_path))
+    with pytest.raises(FileExistsError):
+        manager.move(str(audio), str(destination))
+    assert audio.exists()
+    assert orphan.read_text() == 'existing recovery state'
+    orphan.unlink()
+    result = manager.move(str(audio), str(destination))
+    assert result == str(destination / audio.name)
+    assert not audio.exists()
+    for suffix in SIDECAR_SUFFIXES:
+        assert (destination / audio.with_suffix(suffix).name).read_text() == suffix
+
+
+def test_move_restores_completed_files_when_a_later_sidecar_fails(tmp_path, monkeypatch):
+    from audiorecorder.recordings import manager as module
+
+    make_recording(tmp_path, 'meeting', transcript=True)
+    audio = tmp_path / 'meeting.m4a'
+    checkpoint = audio.with_suffix('.transcription.json')
+    checkpoint.write_text('job state')
+    destination = tmp_path / 'destination'
+    destination.mkdir()
+    move = module.shutil.move
+    def fail_checkpoint(source, target):
+        if source == str(checkpoint):
+            raise OSError('injected failure')
+        return move(source, target)
+    monkeypatch.setattr(module.shutil, 'move', fail_checkpoint)
+    with pytest.raises(OSError, match='injected failure'):
+        RecordingManager(str(tmp_path)).move(str(audio), str(destination))
+    assert audio.read_bytes() == b'not really audio'
+    assert audio.with_suffix('.md').read_text() == '# Transcript'
+    assert checkpoint.read_text() == 'job state'
+    assert not (destination / audio.name).exists()
+
+
+def test_scan_corrupt_checkpoint_is_actionable_and_does_not_crash(tmp_path):
+    make_recording(tmp_path, 'meeting')
+    (tmp_path / 'meeting.transcription.json').write_text('[1,2,3]')
+    recording = RecordingManager(str(tmp_path)).scan()[0]
+    assert recording.transcription_status == 'Job state unreadable — review before retrying'
+
+
+@pytest.mark.parametrize('action', ['rename', 'move'])
+def test_transfer_cannot_overwrite_destination_with_active_transcription(tmp_path, action):
+    from audiorecorder.transcription.jobs import TranscriptionJob
+
+    make_recording(tmp_path, 'meeting', transcript=True)
+    source = tmp_path / 'meeting.m4a'
+    destination = tmp_path / 'destination'
+    destination.mkdir()
+    target = tmp_path / 'renamed.m4a' if action == 'rename' else destination / source.name
+    with (
+        TranscriptionJob(target).locked(),
+        pytest.raises(RuntimeError, match='another process'),
+    ):
+        manager = RecordingManager(str(tmp_path))
+        if action == 'rename':
+            manager.rename(str(source), target.stem)
+        else:
+            manager.move(str(source), str(destination))
+    assert source.exists()
+    assert source.with_suffix('.md').exists()
+    assert not target.exists()

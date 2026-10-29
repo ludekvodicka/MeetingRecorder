@@ -99,14 +99,14 @@ class TestSidecars:
 
         RecordingManager(str(tmp_path)).delete(recording)
 
-        assert list(tmp_path.iterdir()) == []
+        assert not [p for p in tmp_path.iterdir() if p.suffix != ".lock"]
 
     def test_rename_takes_all_of_them(self, tmp_path):
         recording = self.make(tmp_path, "old", SIDECAR_SUFFIXES)
 
         RecordingManager(str(tmp_path)).rename(recording, "new")
 
-        assert {p.name for p in tmp_path.iterdir()} == {
+        assert {p.name for p in tmp_path.iterdir() if p.suffix != ".lock"} == {
             "new.m4a", "new.md", "new.summary.md", "new.live.md",
             "new.speakers.md", "new.speakers.json", "new.transcription.json"}
 

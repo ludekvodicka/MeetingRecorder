@@ -37,7 +37,7 @@ from audiorecorder.meetings.detection import (
     create_meeting_detector,
 )
 from audiorecorder.readiness import capture_readiness
-from audiorecorder.recordings.manager import RecordingManager, sidecars
+from audiorecorder.recordings.manager import RecordingManager
 from audiorecorder.subtitles.document import write_live_transcript
 from audiorecorder.subtitles.engine import SubtitleEngine
 from audiorecorder.subtitles.speaker_document import (
@@ -46,6 +46,7 @@ from audiorecorder.subtitles.speaker_document import (
 )
 from audiorecorder.transcription.cleanup import CleanupWorker
 from audiorecorder.transcription.markdown import language_name
+from audiorecorder.transcription.service import TranscriptionOptions
 from audiorecorder.transcription.soniox import SonioxWorker
 from audiorecorder.ui.audio_player import AudioPlayerWidget
 from audiorecorder.ui.level_bars import DualLevelBars
@@ -876,11 +877,7 @@ class MainWindow(QMainWindow):
         save_config(self.config)
 
         try:
-            p = os.path.basename(path)
-            shutil.move(path, os.path.join(dest_dir, p))
-
-            for sidecar in sidecars(path):
-                shutil.move(str(sidecar), os.path.join(dest_dir, sidecar.name))
+            self._manager.move(path, dest_dir)
 
             self._status_bar.showMessage(f"Moved to {dest_dir}", 5000)
             self._refresh_list()
@@ -904,7 +901,11 @@ class MainWindow(QMainWindow):
             if self._player.current_path == path:
                 self._player.stop_playback()
                 self._recording_list.clear_playing()
-            self._manager.delete(path)
+            try:
+                self._manager.delete(path)
+            except Exception as error:
+                QMessageBox.warning(self, "Delete Error", f"Failed to delete recording:\n{error}")
+                return
             self._refresh_list()
 
     def _transcribe_recording(self, path):
@@ -923,14 +924,9 @@ class MainWindow(QMainWindow):
             )
             return
 
-        lang = self.config.get("language", "en")
-        # Auto sends no hints, so Soniox identifies the language without being nudged.
-        hints = [] if lang == "auto" else [lang]
-        translate = self.config.get("enable_translation", False) and lang != "auto"
-
         worker = SonioxWorker(
-            api_key=api_key, audio_path=path, language_hints=hints,
-            primary_language=lang, enable_translation=translate,
+            api_key=api_key, audio_path=path,
+            options=TranscriptionOptions.from_config(self.config),
         )
         self._busy_paths.add(path)
         self._processing.enqueue("transcribe", path, worker)
