@@ -20,6 +20,7 @@ from audiorecorder.meetings.detection import (  # noqa: E402
     MeetingCandidate,
     MeetingPromptPolicy,
 )
+from audiorecorder.meetings.native_profiles import signing_identity  # noqa: E402
 from audiorecorder.ui import main_window as mw  # noqa: E402
 from audiorecorder.ui.main_window import ACTIVE_TOGGLE_STYLE, MainWindow  # noqa: E402
 
@@ -599,6 +600,7 @@ def test_native_detector_drives_complete_automatic_workflow_without_real_audio(w
                         "bundle": native.test_bundle,
                         "version": "test-1",
                         "process": "999:100",
+                        "signer": signing_identity(native.test_bundle),
                         "running": True,
                         "complete": True,
                         "empty_windows_confirmed": identifier is None and absence == "empty",

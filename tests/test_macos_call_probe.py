@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +8,14 @@ from audiorecorder.meetings.macos_call_probe import (
     AccessibilityReader,
     ProbeIncomplete,
     confirm_no_windows,
+    confirm_process_identity,
 )
+from audiorecorder.meetings.macos_code_identity import (
+    ProcessCodeIdentity,
+    _process_code_identity,
+    verify_running_process,
+)
+from audiorecorder.meetings.native_profiles import signing_identity
 
 
 class Node:
@@ -124,3 +133,82 @@ def test_empty_ax_windows_need_a_healthy_conflict_free_all_spaces_inventory(inve
         kCGWindowOwnerPID="pid",
     )
     assert confirm_no_windows(quartz, 42) is expected
+
+
+def test_ui_evidence_is_rejected_if_process_identity_changes_after_read():
+    class App:
+        def __init__(self, pid=42, bundle="com.microsoft.teams2", launched_at=123.5):
+            self.pid = pid
+            self.bundle = bundle
+            self.launched_at = launched_at
+
+        def processIdentifier(self):
+            return self.pid
+
+        def bundleIdentifier(self):
+            return self.bundle
+
+        def launchDate(self):
+            return SimpleNamespace(timeIntervalSince1970=lambda: self.launched_at)
+
+    def verify(pid, bundle):
+        return "trusted" if (pid, bundle) == (42, "com.microsoft.teams2") else ""
+    arguments = (42, "com.microsoft.teams2", 123.5, "trusted", verify)
+    assert confirm_process_identity(lambda _: App(), *arguments)
+    assert not confirm_process_identity(lambda _: App(pid=43), *arguments)
+    assert not confirm_process_identity(lambda _: App(launched_at=124), *arguments)
+    assert not confirm_process_identity(lambda _: App(bundle="forged"), *arguments)
+    assert not confirm_process_identity(lambda _: None, *arguments)
+    assert not confirm_process_identity(
+        lambda _: App(), 42, "com.microsoft.teams2", 123.5, "other", verify
+    )
+
+
+def test_running_process_identity_is_pid_bound_and_fail_closed():
+    seen = []
+
+    def checker(pid):
+        seen.append(pid)
+        return ProcessCodeIdentity(
+            flags=0x20000001,
+            identifier="com.microsoft.teams2",
+            team_id="UBF8T346G9",
+            validation_category=6,
+        )
+
+    assert verify_running_process(
+        42, "com.microsoft.teams2", checker=checker, platform_name="darwin"
+    ) == signing_identity("com.microsoft.teams2")
+    assert seen == [42]
+    assert not verify_running_process(
+        42,
+        "com.microsoft.teams2",
+        checker=lambda _: ProcessCodeIdentity(
+            flags=0x20000003,
+            identifier="com.microsoft.teams2",
+            team_id="UBF8T346G9",
+            validation_category=6,
+        ),
+        platform_name="darwin",
+    )
+    assert not verify_running_process(
+        42, "com.microsoft.teams2", checker=lambda *_: 1 / 0, platform_name="darwin"
+    )
+    assert not verify_running_process(42, "unknown", checker=checker, platform_name="darwin")
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires the macOS csops ABI")
+def test_kernel_code_identity_reader_is_pid_bound():
+    process = subprocess.Popen(["/bin/sleep", "5"])
+    try:
+        identity = _process_code_identity(process.pid)
+    finally:
+        process.terminate()
+        process.wait()
+
+    assert identity.flags & 0x00000001  # CS_VALID
+    assert identity.flags & 0x20000000  # CS_SIGNED
+    assert not identity.flags & 0x00000002  # CS_ADHOC
+    assert identity.identifier == "com.apple.sleep"
+    assert identity.team_id == ""
+    assert identity.validation_category == 1  # Platform

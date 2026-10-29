@@ -9,10 +9,13 @@ from audiorecorder.meetings.native_calls import (
     control_kind,
     qualification_key,
 )
+from audiorecorder.meetings.native_profiles import signing_identity
 
 TEAMS = "com.microsoft.teams2"
 ZOOM = "us.zoom.xos"
 ACTIVE = {"hangup", "microphone", "camera"}
+TEAMS_SIGNER = signing_identity(TEAMS)
+ZOOM_SIGNER = signing_identity(ZOOM)
 
 
 def app(
@@ -32,6 +35,7 @@ def app(
         running,
         complete,
         (WindowControls(frozenset(controls), complete, window), *extra),
+        signer=signing_identity(bundle),
     )
 
 
@@ -63,9 +67,14 @@ def test_control_sets_must_belong_to_same_complete_window():
 
 
 def test_qualification_bound_to_provider_and_app_version():
-    assert qualification_key(TEAMS, "1") != qualification_key(TEAMS, "2")
-    assert qualification_key(TEAMS, "1") != qualification_key(ZOOM, "1")
-    assert not qualification_key("browser", "1")
+    assert qualification_key(TEAMS, "1", TEAMS_SIGNER) != qualification_key(
+        TEAMS, "2", TEAMS_SIGNER
+    )
+    assert qualification_key(TEAMS, "1", TEAMS_SIGNER) != qualification_key(
+        ZOOM, "1", ZOOM_SIGNER
+    )
+    assert not qualification_key(TEAMS, "1", "forged:com.microsoft.teams2")
+    assert not qualification_key("browser", "1", "forged")
 
 
 def test_diagnostics_never_qualifies_provider_implicitly():

@@ -651,11 +651,15 @@ class SettingsDialog(QDialog):
             )
             return
         stored = dict(self.config.get("native_call_qualifications", {}))
-        stored[bundle] = qualification_key(bundle, native.versions[bundle])
+        stored[bundle] = qualification_key(
+            bundle, native.versions[bundle], native.signers[bundle]
+        )
         self.config["native_call_qualifications"] = stored
         absence = dict(self.config.get("native_call_absence_qualifications", {}))
         if self._test_absence.isChecked() and "absence-stop" in native.transitions[bundle]:
-            absence[bundle] = qualification_key(bundle, native.versions[bundle])
+            absence[bundle] = qualification_key(
+                bundle, native.versions[bundle], native.signers[bundle]
+            )
         else:
             absence.pop(bundle, None)
         self.config["native_call_absence_qualifications"] = absence

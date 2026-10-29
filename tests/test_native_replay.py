@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+from audiorecorder.meetings.native_profiles import signing_identity
+
 path = Path(__file__).resolve().parent.parent / "scripts/replay_native_lifecycle.py"
 spec = importlib.util.spec_from_file_location("native_replay", path)
 module = importlib.util.module_from_spec(spec)
@@ -17,6 +19,7 @@ def sample(at, *, active=False, window="main", complete=True):
                 "bundle": "com.microsoft.teams2",
                 "version": "test-version",
                 "process": "1:1",
+                "signer": signing_identity("com.microsoft.teams2"),
                 "running": True,
                 "complete": complete,
                 "windows": [

@@ -31,3 +31,17 @@ def test_set_version_synchronizes_the_extension(tmp_path, monkeypatch):
 
     assert '__version__ = "0.3.0"' in version_file.read_text(encoding="utf-8")
     assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == "0.3.0"
+
+
+def test_release_build_tools_are_versioned_and_verified_before_execution():
+    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "/continuous/" not in workflow
+    assert "releases/download/${APPIMAGETOOL_VERSION}/" in workflow
+    assert "releases/download/${APPIMAGE_RUNTIME_VERSION}/" in workflow
+    assert "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0" in workflow
+    assert "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d" in workflow
+    assert workflow.count("sha256sum --check --strict") == 2
+    assert workflow.index("sha256sum --check --strict") < workflow.index("chmod +x")
+    assert '$RUNNER_TEMP/appimagetool-x86_64.AppImage' in workflow
+    assert 'APPIMAGETOOL=$tool' in workflow
+    assert 'APPIMAGE_RUNTIME_FILE=$runtime' in workflow

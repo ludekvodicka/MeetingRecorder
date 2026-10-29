@@ -5,8 +5,10 @@ from PyQt6.QtWidgets import QApplication
 
 from audiorecorder.meetings.call_monitor import NativeCallMonitor, parse_snapshot
 from audiorecorder.meetings.native_calls import qualification_key
+from audiorecorder.meetings.native_profiles import signing_identity
 
 BUNDLE = "com.microsoft.teams2"
+SIGNER = signing_identity(BUNDLE)
 
 
 @pytest.fixture(scope="module")
@@ -22,6 +24,7 @@ def snapshot(controls=("hangup", "microphone", "camera"), *, version="1", runnin
                 "bundle": BUNDLE,
                 "process": "123:100",
                 "version": version,
+                "signer": SIGNER if running else "",
                 "complete": True,
                 "running": running,
                 "windows": [{"controls": list(controls), "complete": True, "identifier": "call"}],
@@ -61,7 +64,9 @@ def test_version_change_invalidates_qualification_and_test_evidence(app):
     clock = SimpleNamespace(value=10.0)
     monitor = NativeCallMonitor(clock=lambda: clock.value, process_alive=lambda pid: False)
     monitor.enabled = True
-    monitor.config = {"native_call_qualifications": {BUNDLE: qualification_key(BUNDLE, "1")}}
+    monitor.config = {
+        "native_call_qualifications": {BUNDLE: qualification_key(BUNDLE, "1", SIGNER)}
+    }
     monitor._accept(snapshot(), 10, 0)
     assert monitor.observations()[0].auto_start
     clock.value = 12
@@ -75,7 +80,9 @@ def test_process_exit_keeps_version_qualification_for_stop(app):
     clock = SimpleNamespace(value=10.0)
     monitor = NativeCallMonitor(clock=lambda: clock.value, process_alive=lambda pid: False)
     monitor.enabled = True
-    monitor.config = {"native_call_qualifications": {BUNDLE: qualification_key(BUNDLE, "1")}}
+    monitor.config = {
+        "native_call_qualifications": {BUNDLE: qualification_key(BUNDLE, "1", SIGNER)}
+    }
     monitor._accept(snapshot(), 10, 0)
     clock.value = 11
     monitor._accept(snapshot(), 11, 0)

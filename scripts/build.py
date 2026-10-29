@@ -194,14 +194,21 @@ def package_linux():
         'exec "$HERE/usr/bin/MeetingRecorder" "$@"\n', encoding="utf-8", newline="\n")
     apprun.chmod(0o755)
 
-    tool = shutil.which("appimagetool") or shutil.which("appimagetool-x86_64.AppImage")
+    configured_tool = os.environ.get("APPIMAGETOOL")
+    tool = configured_tool or shutil.which("appimagetool") or shutil.which(
+        "appimagetool-x86_64.AppImage"
+    )
     if tool is None:
         raise SystemExit(
             "appimagetool was not found on PATH. Install it, or download "
             "appimagetool-x86_64.AppImage and put it on PATH.")
     target = RELEASE / f"{ARTIFACT_STEM}-{__version__}-{arch_tag()}.AppImage"
     target.unlink(missing_ok=True)
-    run([tool, str(appdir), str(target)])
+    command = [tool]
+    runtime = os.environ.get("APPIMAGE_RUNTIME_FILE")
+    if runtime:
+        command += ["--runtime-file", runtime]
+    run([*command, str(appdir), str(target)])
     return [tarball, target]
 
 

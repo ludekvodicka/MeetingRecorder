@@ -53,6 +53,7 @@ class NativeCallMonitor(QObject):
         self.history = {bundle: set() for bundle in PROFILES}
         self.active_counts = {bundle: 0 for bundle in PROFILES}
         self.versions = {}
+        self.signers = {}
         self.transitions = {bundle: set() for bundle in PROFILES}
         self.trace = deque(maxlen=256)
         self._window_aliases = {}
@@ -132,7 +133,9 @@ class NativeCallMonitor(QObject):
         approved = {
             bundle
             for bundle, version in self.versions.items()
-            if version and stored.get(bundle) == qualification_key(bundle, version)
+            if version and stored.get(bundle) == qualification_key(
+                bundle, version, self.signers.get(bundle, "")
+            )
         }
         if self.testing:
             approved.add(self.test_bundle)
@@ -143,7 +146,9 @@ class NativeCallMonitor(QObject):
         approved = {
             bundle
             for bundle, version in self.versions.items()
-            if version and stored.get(bundle) == qualification_key(bundle, version)
+            if version and stored.get(bundle) == qualification_key(
+                bundle, version, self.signers.get(bundle, "")
+            )
         }
         if self.testing and self.test_absence:
             approved.add(self.test_bundle)
@@ -258,12 +263,18 @@ class NativeCallMonitor(QObject):
             self.error = "invalid-or-stale-probe"
         self.observed_at = observed_at
         for sample in self.samples:
-            if sample.version:
-                if self.versions.get(sample.bundle, sample.version) != sample.version:
+            if sample.version and sample.signer:
+                previous = (
+                    self.versions.get(sample.bundle, sample.version),
+                    self.signers.get(sample.bundle, sample.signer),
+                )
+                current = (sample.version, sample.signer)
+                if previous != current:
                     self.history[sample.bundle].clear()
                     self.transitions[sample.bundle].clear()
                     self.active_counts[sample.bundle] = 0
                 self.versions[sample.bundle] = sample.version
+                self.signers[sample.bundle] = sample.signer
             self.history[sample.bundle].add(sample.state)
             self.active_counts[sample.bundle] = (
                 self.active_counts[sample.bundle] + 1 if sample.state == "active" else 0
@@ -319,6 +330,7 @@ class NativeCallMonitor(QObject):
                 {
                     "bundle": sample.bundle,
                     "version": sample.version,
+                    "signer": sample.signer,
                     "process": process,
                     "running": sample.running,
                     "complete": sample.complete,
@@ -339,6 +351,7 @@ class NativeCallMonitor(QObject):
     def can_approve(self, bundle):
         return bool(
             self.versions.get(bundle)
+            and self.signers.get(bundle)
             and "joined" in self.transitions[bundle]
             and self.transitions[bundle] & {"ended", "absence-stop"}
         )
@@ -394,6 +407,7 @@ class NativeCallMonitor(QObject):
                 {
                     "bundle": s.bundle,
                     "version": s.version,
+                    "signer": s.signer,
                     "state": s.state,
                     "complete": s.complete,
                     "empty_windows_confirmed": s.empty_windows_confirmed,

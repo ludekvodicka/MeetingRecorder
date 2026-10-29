@@ -11,6 +11,7 @@ import time
 from collections import deque
 from pathlib import Path
 
+from audiorecorder.meetings.macos_code_identity import verify_running_process
 from audiorecorder.meetings.native_calls import PROFILES, control_kind
 
 _CONTROL_ROLES = {"AXButton", "AXCheckBox", "AXPopUpButton", "AXMenuButton", "AXRadioButton"}
@@ -38,6 +39,25 @@ def confirm_no_windows(quartz, pid):
             if owner is None or int(owner) == pid:
                 return False
         return True
+    except Exception:
+        return False
+
+
+def confirm_process_identity(
+    lookup, pid, bundle, launched_at, expected_signer, identity_verifier
+):
+    """Re-bind collected UI evidence to the process verified before the read."""
+    try:
+        current = lookup(pid)
+        date = current.launchDate() if current is not None else None
+        return bool(
+            current is not None
+            and current.bundleIdentifier() == bundle
+            and current.processIdentifier() == pid
+            and date is not None
+            and date.timeIntervalSince1970() == launched_at
+            and identity_verifier(pid, bundle) == expected_signer
+        )
     except Exception:
         return False
 
@@ -126,7 +146,7 @@ class AccessibilityReader:
         return output, all(w["complete"] for w in output)
 
 
-def snapshot():
+def snapshot(identity_verifier=verify_running_process):
     if sys.platform != "darwin":
         return {"permission": "unavailable", "apps": []}
     import ApplicationServices as AX
@@ -149,7 +169,20 @@ def snapshot():
             date = app.launchDate()
             if date is None:
                 raise ProbeIncomplete("process-identity")
-            process = f"{app.processIdentifier()}:{date.timeIntervalSince1970():.6f}"
+            pid = app.processIdentifier()
+            launched_at = date.timeIntervalSince1970()
+            process = f"{pid}:{launched_at:.6f}"
+            signer = identity_verifier(pid, bundle)
+            if not signer:
+                apps.append({
+                    "bundle": bundle,
+                    "running": True,
+                    "complete": False,
+                    "process": process,
+                    "signer": "",
+                    "reason": "untrusted-code",
+                })
+                continue
             native_bundle = NSBundle.bundleWithURL_(app.bundleURL())
             version = str(
                 native_bundle.objectForInfoDictionaryKey_("CFBundleShortVersionString") or ""
@@ -160,19 +193,29 @@ def snapshot():
                 "complete": False,
                 "process": process,
                 "version": version[:80],
+                "signer": signer,
                 "windows": [],
                 "reason": "permission-required",
             }
             if permission == "granted":
                 reader = AccessibilityReader(AX)
-                item["windows"], item["complete"] = reader.application(app.processIdentifier())
+                item["windows"], item["complete"] = reader.application(pid)
                 if item["complete"] and not item["windows"]:
                     import Quartz
 
                     item["empty_windows_confirmed"] = confirm_no_windows(
-                        Quartz, app.processIdentifier()
+                        Quartz, pid
                     )
                 item["reason"] = "controls-read" if item["complete"] else "incomplete-tree"
+            if not confirm_process_identity(
+                NSRunningApplication.runningApplicationWithProcessIdentifier_,
+                pid,
+                bundle,
+                launched_at,
+                signer,
+                identity_verifier,
+            ):
+                raise ProbeIncomplete("process-identity-changed")
             apps.append(item)
         except Exception:
             apps.append(

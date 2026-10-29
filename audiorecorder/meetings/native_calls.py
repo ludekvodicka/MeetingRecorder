@@ -10,7 +10,12 @@ import re
 from dataclasses import dataclass, field
 
 from audiorecorder.meetings.lifecycle import Observation
-from audiorecorder.meetings.native_profiles import MATCHER_REVISION, PROFILES
+from audiorecorder.meetings.native_profiles import (
+    MATCHER_REVISION,
+    PROFILES,
+    SIGNING_POLICIES,
+    signing_identity,
+)
 
 CONTROL_KINDS = frozenset({"hangup", "microphone", "camera", "join", "rejoin"})
 # Exact control names, optionally followed by an accessibility keyboard shortcut.
@@ -44,11 +49,19 @@ def control_kind(text):
     return None
 
 
-def qualification_key(bundle, version):
-    if bundle not in PROFILES or not version or len(version) > 80:
+def qualification_key(bundle, version, signer):
+    if (
+        bundle not in PROFILES
+        or not version
+        or len(version) > 80
+        or signer != signing_identity(bundle)
+    ):
         return ""
     rules = json.dumps({key: sorted(values) for key, values in _NAMES.items()}, sort_keys=True)
-    return hashlib.sha256(f"{bundle}:{version}:{MATCHER_REVISION}:{rules}".encode()).hexdigest()
+    policy = SIGNING_POLICIES[bundle]
+    policy_material = f"{policy['team_id']}:{policy['validation_categories']}"
+    material = f"{bundle}:{version}:{signer}:{policy_material}:{MATCHER_REVISION}:{rules}"
+    return hashlib.sha256(material.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -69,12 +82,17 @@ class NativeAppSample:
     reason: str = ""
     empty_windows_confirmed: bool = False
     closed_windows: frozenset[str] = frozenset()
+    signer: str = ""
 
     @property
     def state(self):
         if not self.running:
             return "not-running" if self.complete else "unknown"
-        if not self.process or not self.version:
+        if (
+            not self.process
+            or not self.version
+            or self.signer != signing_identity(self.bundle)
+        ):
             return "unknown"
         # The three controls must occur in the same fully inspected window. A prejoin
         # window or an unrelated chat's Mute button cannot supply joined-call evidence.
@@ -302,9 +320,15 @@ def parse_snapshot(value):
         for key in ("running", "complete"):
             if type(app.get(key)) is not bool:
                 raise ValueError("invalid native health")
-        for key in ("version", "process", "reason"):
+        for key in ("version", "process", "reason", "signer"):
             if not isinstance(app.get(key, ""), str) or len(app.get(key, "")) > 100:
                 raise ValueError("invalid native metadata")
+        if app["running"] and "signer" not in app:
+            raise ValueError("missing signer identity")
+        if app["running"] and app["complete"] and app.get("signer") != signing_identity(
+            app["bundle"]
+        ):
+            raise ValueError("untrusted signer identity")
         parsed_windows = []
         for window in windows:
             if not isinstance(window, dict) or type(window.get("complete")) is not bool:
@@ -335,6 +359,7 @@ def parse_snapshot(value):
                 app.get("reason", ""),
                 app.get("empty_windows_confirmed", False),
                 frozenset(closed),
+                app.get("signer", ""),
             )
         )
     return tuple(output)
