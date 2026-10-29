@@ -9,13 +9,27 @@ seamlessly: restarting the read position every block would put a step at every b
 
 import numpy as np
 
+# Taps of the anti-aliasing filter. 63 Hamming-windowed taps attenuate the stopband by
+# about 50 dB and cost one short convolution per block.
+FILTER_TAPS = 63
+# The passband edge as a share of the target rate: just below its Nyquist frequency.
+CUTOFF_RATIO = 0.45
+
+
+def _lowpass(source_rate, target_rate):
+    """Unity-gain windowed-sinc low-pass that keeps only what the target rate can carry."""
+    cutoff = CUTOFF_RATIO * target_rate / source_rate
+    n = np.arange(FILTER_TAPS) - (FILTER_TAPS - 1) / 2
+    taps = 2 * cutoff * np.sinc(2 * cutoff * n) * np.hamming(FILTER_TAPS)
+    return (taps / taps.sum()).astype(np.float32)
+
 
 class Downsampler:
     """Mono, rate-converted, int16 bytes, continuous across calls.
 
-    Linear interpolation, the same as the encoder uses when it mixes tracks of different
-    rates. It is not a brickwall filter and does not pretend to be: speech at 16 kHz from a
-    48 kHz source is what the API asks for, and the model is doing the listening.
+    When the rate goes down, a low-pass filter first removes everything above the target's
+    Nyquist frequency; without it, sibilants and room noise from a 48 kHz microphone would
+    fold back into the speech band. Linear interpolation then picks the output samples.
     """
 
     def __init__(self, source_rate, target_rate):
@@ -23,18 +37,24 @@ class Downsampler:
             raise ValueError(f"rates must be positive, got {source_rate} and {target_rate}")
         # How far to step through the source for each output sample.
         self._step = source_rate / target_rate
-        self._position = 0.0
-        self._pending = np.zeros(0, dtype=np.float32)
+        self._taps = _lowpass(source_rate, target_rate) if source_rate > target_rate else None
+        self.reset()
 
     def reset(self):
         self._position = 0.0
         self._pending = np.zeros(0, dtype=np.float32)
+        # The last input samples, so the filter runs across block boundaries without a seam.
+        self._history = np.zeros(FILTER_TAPS - 1, dtype=np.float32)
 
     def feed(self, block):
         """A block of captured audio in, int16 bytes out. May legitimately return nothing."""
         mono = np.asarray(block, dtype=np.float32)
         if mono.ndim > 1:
             mono = mono.mean(axis=1)
+        if self._taps is not None and mono.size:
+            extended = np.concatenate([self._history, mono])
+            self._history = extended[-(FILTER_TAPS - 1):]
+            mono = np.convolve(extended, self._taps, mode="valid").astype(np.float32)
 
         data = np.concatenate([self._pending, mono]) if self._pending.size else mono
         # Interpolation reads one sample past the index, so the last sample can never be a

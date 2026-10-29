@@ -63,3 +63,27 @@ class TestSingleInstance:
         finally:
             if successor._server is not None:
                 successor.close()
+
+    def test_a_copy_of_an_older_build_is_found_by_its_legacy_name(self, app, lock_name):
+        legacy = SingleInstance(f"{lock_name}-legacy")
+        assert legacy.take_ownership()
+        try:
+            current = SingleInstance(lock_name, legacy_name=f"{lock_name}-legacy")
+            assert current.take_ownership() is False
+            assert current._server is None
+        finally:
+            legacy.close()
+
+
+def test_each_user_gets_their_own_socket_name(monkeypatch):
+    """Windows named pipes are machine-wide; Remote Desktop users must not meet."""
+    from types import SimpleNamespace
+
+    from audiorecorder import single_instance
+
+    names = []
+    for home in ("C:/Users/alice", "C:/Users/bob"):
+        monkeypatch.setattr(single_instance, "QDir", SimpleNamespace(homePath=lambda h=home: h))
+        names.append(single_instance.user_server_name())
+    assert names[0] != names[1]
+    assert all(name.startswith(single_instance.LEGACY_SERVER_NAME + ".") for name in names)

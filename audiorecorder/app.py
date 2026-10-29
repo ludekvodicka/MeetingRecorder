@@ -8,7 +8,7 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from audiorecorder.config import load_config, save_config
-from audiorecorder.single_instance import SingleInstance
+from audiorecorder.single_instance import LEGACY_SERVER_NAME, SingleInstance, user_server_name
 from audiorecorder.ui.main_window import MainWindow
 from audiorecorder.ui.update_indicator import UpdateIndicator
 from audiorecorder.updates import AppUpdates
@@ -101,7 +101,13 @@ def main():
 
         raise SystemExit(STATUS_CODES[credential_status()])
     if "--smoke-test" in sys.argv:
-        _runtime_smoke_test()
+        try:
+            _runtime_smoke_test()
+        except Exception:
+            # A windowed build shows an uncaught traceback in a dialog, which would hang
+            # the release job until it times out. The exit code is the result.
+            logging.getLogger(__name__).exception("smoke test failed")
+            raise SystemExit(1) from None
         return
     if "--notification-smoke" in sys.argv:
         _notification_smoke()
@@ -121,7 +127,7 @@ def main():
 
     # Before the window, and before any keyboard hook: a second copy would dictate and
     # paste everything twice.
-    instance = SingleInstance()
+    instance = SingleInstance(user_server_name(), LEGACY_SERVER_NAME)
     if not instance.take_ownership():
         return
 
@@ -132,8 +138,15 @@ def main():
     window = MainWindow(cfg, notifications)
     updates.set_busy_check(window.busy_reason)
     window.statusBar().addPermanentWidget(UpdateIndicator(updates, window))
+    # A ready update installs on a normal quit, but not while the OS session ends: the
+    # helper would race the logoff and could leave a half-swapped program behind.
     session_ending = []
-    app.commitDataRequest.connect(lambda _manager: session_ending.append(True))
+
+    def end_session(_manager):
+        session_ending.append(True)
+        window.end_session()
+
+    app.commitDataRequest.connect(end_session)
     app.aboutToQuit.connect(lambda: updates.quit(bool(session_ending)))
     quit_filter = QuitFilter(window)
     app.installEventFilter(quit_filter)

@@ -128,3 +128,20 @@ class TestEdges:
             Downsampler(bad, TARGET)
         with pytest.raises(ValueError):
             Downsampler(48000, bad)
+
+
+class TestAliasing:
+    def test_a_tone_above_the_target_nyquist_does_not_fold_into_speech(self):
+        """12 kHz at 48 kHz would alias to 4 kHz at 16 kHz without the low-pass filter."""
+        data = sine(0.5, 48000, freq=12000.0)
+        sampler = Downsampler(48000, TARGET)
+        out = to_float(b"".join(sampler.feed(block) for block in in_blocks(data)))
+        settled = out[100:]
+        assert np.sqrt(np.mean(settled ** 2)) < 0.01
+
+    def test_speech_band_keeps_its_level(self):
+        data = sine(0.5, 48000, freq=1000.0)
+        sampler = Downsampler(48000, TARGET)
+        out = to_float(b"".join(sampler.feed(block) for block in in_blocks(data)))
+        settled = out[100:]
+        assert np.sqrt(np.mean(settled ** 2)) == pytest.approx(np.sqrt(0.5), rel=0.03)

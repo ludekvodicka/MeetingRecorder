@@ -116,6 +116,14 @@ class CaptureSession(QObject):
             result = CaptureResult(recording, backend=backend, error=str(error), unresolved=True)
         self.stopped.emit(result)
 
+    def wait_idle(self, timeout):
+        """Block until queued start/stop work has run; False when timeout passed first."""
+        try:
+            self.executor.submit(lambda: None).result(timeout)
+            return True
+        except TimeoutError:
+            return False
+
     def close(self):
         # Called only after the lifecycle has acknowledged released capture resources.
         self.executor.shutdown(wait=False)

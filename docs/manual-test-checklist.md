@@ -83,6 +83,14 @@ and say in the release notes what was not exercised.
       SHA-256 matches the line in the new `SHA256SUMS.txt`, the title shows the new version, and
       `updates/result.json` in the cache folder says installed
 - [ ] Start a recording, then Restart and install: the dialog refuses and names the recording
+- [ ] With an update ready and Dictation on, close the window: the update installs on that quit
+- [ ] Close the window during a recording: it asks first; No keeps recording, Yes saves and exits
+- [ ] Sign out of Windows during a recording, sign in and start the app: the status bar says it
+      recovered an interrupted recording, and the new `.m4a` plays back
+- [ ] Start the app in two Windows accounts at once (fast user switching or Remote Desktop):
+      both run; a second start in the same account only brings its window forward
+- [ ] Set the output directory to a FAT32 or exFAT USB stick: a recording and its transcript
+      are saved there
 
 ### macOS
 
@@ -155,14 +163,12 @@ The two backends have to stay interchangeable, so run these on every platform yo
 - [ ] The temporary `_rec_system_*.wav` and `_rec_mic_*.wav` files are gone after encoding
 - [ ] A recording that is stopped immediately still produces a valid file
 
-## Custom build update policy
+## Self-built package update policy
 
-- [ ] In a packaged custom build, a newer upstream release shows notes and a release link,
-  without a download or Restart and install action, on every platform.
-- [ ] Preserve native macOS capture, meeting/calendar/browser detection and transcription
-  queue/recovery when integrating origin/main. Run the combined root and shared test suites.
+- [ ] In a package built locally with `scripts/build.py package`, a newer release shows notes
+  and a release link, without a download or Restart and install action, on every platform.
 - [ ] Check source-run updates stay off; real capture/transcription acceptance is separate
   from the mocked provider and updater tests.
 
-The automatic updater scenarios above describe the retained upstream library. Our custom
-application selects notification-only mode so stock binaries cannot replace our features.
+The automatic updater scenarios above apply to official packages, which the release workflow
+marks at build time (`docs/architecture/self-update.md`).

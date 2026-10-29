@@ -63,6 +63,8 @@ log = logging.getLogger(__name__)
 
 AUTO_START_SECONDS = 5
 AUTO_START_SOURCES = frozenset()  # Native heuristics await per-source qualification.
+# Windows shows its "apps are preventing shutdown" screen after about five seconds.
+SESSION_END_STOP_SECONDS = 4
 
 # Both header toggles look the same when they are on: green means this is costing you
 # a live Soniox session.
@@ -188,6 +190,7 @@ class MainWindow(QMainWindow):
         self._pending_sidecars = {}
         self._quitting = False
         self._exit_ready = False
+        self._session_ending = False
         self._tray_icon = None
         self._browser_meeting_bridge = BrowserMeetingBridge()
         self._calendar_meeting_detector = create_calendar_detector()
@@ -217,6 +220,7 @@ class MainWindow(QMainWindow):
         self._capture_session.mic_level.connect(self._level_bars.set_mic_level)
         self._create_tray_icon()
         self._refresh_list()
+        self._recover_orphaned_captures()
 
         self._system_level_signal.connect(self._level_bars.set_system_level)
         self._mic_level_signal.connect(self._level_bars.set_mic_level)
@@ -701,24 +705,12 @@ class MainWindow(QMainWindow):
 
             self._status_bar.showMessage("Encoding to M4A...")
 
-            thread = QThread()
-            worker = EncoderWorker(
-                system_path,
-                mic_path,
-                output_path,
-                capture_config.get("system_volume", 1.0),
-                capture_config.get("mic_volume", 1.0),
+            worker = self._enqueue_encoder(
+                system_path, mic_path, output_path, capture_config,
+                self._on_encode_finished,
+                lambda error, path=output_path: self._on_encode_error(error, path),
             )
-            worker.moveToThread(thread)
-            thread.started.connect(worker.run)
-            worker.finished.connect(self._on_encode_finished)
-            worker.error.connect(lambda error, path=output_path: self._on_encode_error(error, path))
-            worker.finished.connect(thread.quit)
-            worker.error.connect(thread.quit)
-            entry = (thread, worker)
             self._encoding_ids[output_path] = (result.recording, worker)
-            self._encoder_queue.append(entry)
-            thread.finished.connect(lambda e=entry: self._cleanup_encoder(e))
             self._start_next_encoder()
         else:
             self._finish_subtitles()
@@ -743,6 +735,62 @@ class MainWindow(QMainWindow):
         save_config(self.config)
         self._status_bar.showMessage(f"Capture failed: {message}")
         self._lifecycle.notify("error", "Capture interrupted", body=message)
+
+    def _enqueue_encoder(self, system_path, mic_path, output_path, config, finished, error):
+        thread = QThread()
+        worker = EncoderWorker(
+            system_path,
+            mic_path,
+            output_path,
+            config.get("system_volume", 1.0),
+            config.get("mic_volume", 1.0),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(finished)
+        worker.error.connect(error)
+        worker.finished.connect(thread.quit)
+        worker.error.connect(thread.quit)
+        entry = (thread, worker)
+        self._encoder_queue.append(entry)
+        thread.finished.connect(lambda e=entry: self._cleanup_encoder(e))
+        return worker
+
+    def _recover_orphaned_captures(self):
+        """Encode capture files that a logged-off or crashed session left behind."""
+        for system_path, mic_path, last_write in self._manager.orphaned_captures():
+            output_path = os.path.join(
+                self.config["output_dir"], self._manager.generate_filename(last_write))
+            self._enqueue_encoder(
+                system_path, mic_path, output_path, self.config,
+                self._on_recovery_finished,
+                lambda error, s=system_path, m=mic_path: self._on_recovery_error(error, s, m),
+            )
+        self._start_next_encoder()
+
+    def _on_recovery_finished(self, path):
+        self._status_bar.showMessage(
+            f"Recovered an interrupted recording: {os.path.basename(path)}", 8000)
+        self._refresh_list()
+
+    def _on_recovery_error(self, error, system_path, mic_path):
+        kept = self._manager.set_aside_capture(system_path, mic_path)
+        self._status_bar.showMessage("An interrupted recording could not be recovered")
+        self._show_recording_error(
+            "An interrupted recording could not be recovered. Its audio was kept.",
+            f"{error}\nRetained audio: {', '.join(kept)}",
+        )
+
+    def end_session(self):
+        """The operating system session is ending: close the capture files while we can.
+
+        Windows may kill the process before the encoder finishes. The finished WAV files
+        stay in the output directory and the next start encodes them.
+        """
+        self._session_ending = True
+        if self._is_recording:
+            self._stop_recording()
+        self._capture_session.wait_idle(SESSION_END_STOP_SECONDS)
 
     def _start_next_encoder(self):
         if not self._active_encoders and self._encoder_queue:
@@ -1363,6 +1411,18 @@ class MainWindow(QMainWindow):
             and self._tray_icon.isVisible()
         ):
             self.hide()
+            event.ignore()
+            return
+        if (
+            not self._quitting
+            and not self._session_ending
+            and self._is_recording
+            and QMessageBox.question(
+                self, "Recording in Progress",
+                "A recording is in progress. Stop, save it and exit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            ) != QMessageBox.StandardButton.Yes
+        ):
             event.ignore()
             return
         self._quitting = True

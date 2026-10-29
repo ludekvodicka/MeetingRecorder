@@ -2,6 +2,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 import pytest
 
@@ -98,8 +100,12 @@ with TranscriptionJob(sys.argv[1]).locked():
     print('locked', flush=True)
     time.sleep(30)
 '''
-    child = subprocess.Popen([sys.executable, '-c', script, str(audio)], stdout=subprocess.PIPE,
-                             text=True, env={**os.environ})
+    # A Windows venv python.exe is a launcher; killing it would leave the real interpreter
+    # holding the lock. The lock code needs only the standard library and the source tree.
+    interpreter = getattr(sys, '_base_executable', sys.executable)
+    root = str(Path(__file__).resolve().parents[1])
+    child = subprocess.Popen([interpreter, '-c', script, str(audio)], stdout=subprocess.PIPE,
+                             text=True, env={**os.environ, 'PYTHONPATH': root})
     try:
         assert child.stdout.readline().strip() == 'locked'
         with (
@@ -109,8 +115,15 @@ with TranscriptionJob(sys.argv[1]).locked():
             pytest.fail('competing lock acquired')
         child.kill()
         child.wait(timeout=3)
-        with TranscriptionJob(audio).locked():
-            pass
+        # Windows releases the locks of a terminated process asynchronously.
+        for _ in range(50):
+            try:
+                with TranscriptionJob(audio).locked():
+                    break
+            except RuntimeError:
+                time.sleep(0.1)
+        else:
+            pytest.fail('the lock outlived its owner process')
     finally:
         if child.poll() is None:
             child.kill()

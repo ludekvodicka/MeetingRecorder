@@ -76,9 +76,47 @@ class RecordingManager:
         except Exception:
             return 0.0
 
-    def generate_filename(self):
-        ts = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+    def generate_filename(self, when=None):
+        ts = (when or datetime.now()).strftime("%Y-%m-%d %H-%M-%S")
         return f"Recording {ts} {uuid.uuid4().hex[:8]}.m4a"
+
+    def orphaned_captures(self):
+        """Capture files a killed process left behind, as (system, mic, last_write) tuples.
+
+        A recording writes _rec_mic_<id>.wav and, unless it is microphone-only,
+        _rec_system_<id>.wav into the output directory, and the encoder deletes both once
+        the M4A exists. Files still there at start-up belong to a session that was logged
+        off or crashed mid-recording; their data is readable even without a final header.
+        """
+        directory = Path(self.output_dir)
+        if not directory.exists():
+            return []
+        captures = []
+        for mic in sorted(directory.glob("_rec_mic_*.wav")):
+            system = mic.with_name("_rec_system_" + mic.name.removeprefix("_rec_mic_"))
+            # Recordings are named by the time they stopped, which here is the last write.
+            last_write = datetime.fromtimestamp(mic.stat().st_mtime)
+            captures.append((str(system) if system.exists() else None, str(mic), last_write))
+        return captures
+
+    @staticmethod
+    def set_aside_capture(system_path, mic_path):
+        """Rename capture files that could not be encoded, so start-up stops retrying them.
+
+        Returns the new paths; the audio stays for the user to inspect.
+        """
+        kept = []
+        for path in (mic_path, system_path):
+            if path is None:
+                continue
+            source = Path(path)
+            target = source.with_name("Unrecovered" + source.name.removeprefix("_rec"))
+            try:
+                source.rename(target)
+                kept.append(str(target))
+            except OSError:
+                kept.append(str(source))
+        return kept
 
     def delete(self, recording_path):
         recording = Path(recording_path)
