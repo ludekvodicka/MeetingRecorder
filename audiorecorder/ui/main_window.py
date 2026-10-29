@@ -4,9 +4,10 @@ import shutil
 import sys
 import threading
 import time
+from collections import deque
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QDesktopServices
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -23,8 +24,9 @@ from PyQt6.QtWidgets import (
 )
 
 from audiorecorder import secrets, update_check
-from audiorecorder.audio.backend import CaptureError, create_backend
 from audiorecorder.audio.encoder import mix_and_encode
+from audiorecorder.audio.runtime import capture_runtime
+from audiorecorder.audio.session import CaptureSession
 from audiorecorder.config import DEFAULT_SUMMARY_PROMPT, save_config
 from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
@@ -35,6 +37,7 @@ from audiorecorder.meetings.detection import (
     MeetingPromptPolicy,
     create_meeting_detector,
 )
+from audiorecorder.readiness import capture_readiness
 from audiorecorder.recordings.manager import RecordingManager, sidecars
 from audiorecorder.subtitles.document import write_live_transcript
 from audiorecorder.subtitles.engine import SubtitleEngine
@@ -47,8 +50,9 @@ from audiorecorder.transcription.markdown import language_name
 from audiorecorder.transcription.soniox import SonioxWorker
 from audiorecorder.ui.audio_player import AudioPlayerWidget
 from audiorecorder.ui.level_bars import DualLevelBars
-from audiorecorder.ui.meeting_prompt import MeetingPrompt
+from audiorecorder.ui.lifecycle_adapter import LifecycleAdapter
 from audiorecorder.ui.overlay import OverlayWidget
+from audiorecorder.ui.processing import ProcessingQueue
 from audiorecorder.ui.recording_list import RecordingListWidget
 from audiorecorder.ui.settings_dialog import SettingsDialog
 from audiorecorder.ui.speaker_mapping import SpeakerMappingDialog
@@ -57,8 +61,8 @@ from audiorecorder.version import __version__
 
 log = logging.getLogger(__name__)
 
-AUTO_START_SECONDS = 10
-AUTO_START_SOURCES = frozenset({"native-window", "browser-extension", "teams-media"})
+AUTO_START_SECONDS = 5
+AUTO_START_SOURCES = frozenset()  # Native heuristics await per-source qualification.
 
 # Both header toggles look the same when they are on: green means this is costing you
 # a live Soniox session.
@@ -115,8 +119,10 @@ class DictationHotkeyFilter(QObject):
         if event.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             return False
         # bool(), because the modifier test yields a flag and eventFilter must return a bool.
-        return bool(event.key() == Qt.Key.Key_Space
-                    and event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        return bool(
+            event.key() == Qt.Key.Key_Space
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        )
 
 
 class EncoderWorker(QObject):
@@ -133,9 +139,12 @@ class EncoderWorker(QObject):
 
     def run(self):
         try:
-            mix_and_encode(
-                self.system_path, self.mic_path, self.output_path,
-                system_volume=self.system_vol, mic_volume=self.mic_vol,
+            self.result = mix_and_encode(
+                self.system_path,
+                self.mic_path,
+                self.output_path,
+                system_volume=self.system_vol,
+                mic_volume=self.mic_vol,
             )
             self.finished.emit(self.output_path)
         except Exception as e:
@@ -145,10 +154,10 @@ class EncoderWorker(QObject):
 class MainWindow(QMainWindow):
     _system_level_signal = pyqtSignal(float)
     _mic_level_signal = pyqtSignal(float)
-    _capture_error_signal = pyqtSignal(str)
+    _capture_error_signal = pyqtSignal(str, str)
     _update_available_signal = pyqtSignal(str)
 
-    def __init__(self, config):
+    def __init__(self, config, notifications=None):
         super().__init__()
         self.config = config
         self._capture = None
@@ -157,8 +166,18 @@ class MainWindow(QMainWindow):
 
         self._manager = RecordingManager(config["output_dir"])
         self._active_encoders = []
+        self._encoder_queue = deque()
+        self._encoding_ids = {}
+        self._recording_config = {}
+        self._partial_recordings = set()
+        self._last_capture_test = config.get("capture_readiness")
+        self._error_dialogs = []
         self._busy_paths = set()
-        self._transcribe_thread = None
+        self._processing = ProcessingQueue(self)
+        self._processing.progress.connect(self._on_processing_progress)
+        self._processing.completed.connect(self._on_processing_completed)
+        self._processing.failed.connect(self._on_processing_failed)
+        self._processing.drained.connect(self._finish_pending_quit)
         self._dictation = None
         self._dictation_active = False
         self._subtitle_engine = None
@@ -173,11 +192,13 @@ class MainWindow(QMainWindow):
         self._browser_meeting_bridge = BrowserMeetingBridge()
         self._calendar_meeting_detector = create_calendar_detector()
         self._native_meeting_detector = create_meeting_detector()
-        self._meeting_detector = CombinedMeetingDetector([
-            self._native_meeting_detector,
-            self._browser_meeting_bridge,
-            self._calendar_meeting_detector,
-        ])
+        self._meeting_detector = CombinedMeetingDetector(
+            [
+                self._native_meeting_detector,
+                self._browser_meeting_bridge,
+                self._calendar_meeting_detector,
+            ]
+        )
         self._meeting_prompt_policy = MeetingPromptPolicy()
         self._meeting_prompt = None
         self._overlay = OverlayWidget()
@@ -187,6 +208,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Meeting Recorder - v{__version__}")
         self.setMinimumSize(600, 650)
         self._build_ui()
+        self._lifecycle = LifecycleAdapter(self, notifications)
+        self._capture_session = CaptureSession()
+        self._capture_session.started.connect(self._capture_started)
+        self._capture_session.stopped.connect(self._capture_stopped)
+        self._capture_session.failed.connect(self._on_capture_error)
+        self._capture_session.system_level.connect(self._level_bars.set_system_level)
+        self._capture_session.mic_level.connect(self._level_bars.set_mic_level)
         self._create_tray_icon()
         self._refresh_list()
 
@@ -205,36 +233,35 @@ class MainWindow(QMainWindow):
         if sys.platform != "darwin":
             return
         menu = QMenu(self)
-        show_action = QAction("Show Meeting Recorder", self)
-        show_action.triggered.connect(self._show_from_tray)
-        menu.addAction(show_action)
+        self._tray_start = menu.addAction("Start Recording", self._start_recording)
+        self._tray_stop = menu.addAction("Stop Recording", self._stop_recording)
+        self._tray_start.setEnabled(False)
+        self._tray_stop.setEnabled(False)
         menu.addSeparator()
-        quit_action = QAction("Quit Meeting Recorder", self)
-        quit_action.triggered.connect(self._quit_from_tray)
-        menu.addAction(quit_action)
+        menu.addAction("Open Meeting Recorder", self._show_from_tray)
+        menu.aboutToShow.connect(self._update_tray_actions)
 
         tray = QSystemTrayIcon(QApplication.instance().windowIcon(), self)
         tray.setToolTip("Meeting Recorder · meeting detection is active")
         tray.setContextMenu(menu)
-        tray.activated.connect(self._tray_activated)
+        # macOS opens the attached native menu on click. An activation handler
+        # that raises the window would also bring the app forward when using it.
         tray.show()
         self._tray_icon = tray
+        self._update_tray_actions()
 
     def _show_from_tray(self):
         self.showNormal()
         self.raise_()
         self.activateWindow()
 
-    def _tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self._show_from_tray()
-
     def _quit_from_tray(self):
         self._quitting = True
-        QApplication.instance().quit()
+        self.close()
 
     def _start_update_check(self):
         """Ask GitHub for a newer release, off the UI thread, failing silently."""
+
         def check():
             latest = update_check.fetch_latest_version()
             if latest and update_check.is_newer(latest, __version__):
@@ -244,10 +271,13 @@ class MainWindow(QMainWindow):
 
     def _on_update_available(self, latest):
         self._status_bar.showMessage(
-            f"Version {latest} is available at {update_check.RELEASES_PAGE}", 15000)
+            f"Version {latest} is available at {update_check.RELEASES_PAGE}", 15000
+        )
 
     def _sync_meeting_detection(self):
-        if self.config.get("meeting_detection", True):
+        if hasattr(self, "_lifecycle"):
+            self._lifecycle.configure()
+        if self.config.get("meeting_detection", True) or self._lifecycle.native.testing:
             if not self._browser_meeting_bridge.start():
                 self._status_bar.showMessage(
                     "Browser meeting detection unavailable: localhost port 8765 is busy",
@@ -280,41 +310,25 @@ class MainWindow(QMainWindow):
         self._browser_status_label.setText(text)
 
     def _poll_for_meeting(self):
-        self._update_browser_status()
-        calendar_notice = self._calendar_meeting_detector.pop_notice()
-        if calendar_notice:
-            self._status_bar.showMessage(calendar_notice, 8000)
-        candidates = self._meeting_detector.scan()
-        if (self._meeting_prompt is not None
-                and self._meeting_prompt.is_automatic
-                and self._meeting_prompt.candidate.key
-                not in {candidate.key for candidate in candidates}):
-            self._meeting_prompt_policy.next_prompt(candidates, blocked=True)
-            self._meeting_prompt.reject()
+        self._lifecycle.poll()
+
+    def _update_lifecycle_tray(self, text):
+        if self._tray_icon is None:
             return
-        candidate = self._meeting_prompt_policy.next_prompt(
-            candidates,
-            blocked=self._is_recording or self._meeting_prompt is not None,
+        self._tray_icon.setToolTip(f"Meeting Recorder · {text}")
+        self._update_tray_actions()
+
+    def _update_tray_actions(self):
+        controller = self._lifecycle.controller
+        controller.blocked = self._recording_start_blocked()
+        self._tray_start.setEnabled(controller.can_start)
+        self._tray_stop.setEnabled(controller.can_stop and not controller.closing)
+
+    def _recording_start_blocked(self):
+        return (
+            self._dictation_active
+            or len(self._encoder_queue) + len(self._active_encoders) >= 3
         )
-        if candidate is None:
-            return
-        automatic = (
-            self.config.get("automatic_recording", False)
-            and candidate.source in AUTO_START_SOURCES
-        )
-        prompt = MeetingPrompt(
-            candidate,
-            _meeting_prompt_parent(self),
-            auto_start_seconds=AUTO_START_SECONDS if automatic else None,
-        )
-        self._meeting_prompt = prompt
-        prompt.accepted.connect(self._start_detected_meeting)
-        prompt.finished.connect(
-            lambda result, shown=prompt: self._clear_meeting_prompt(shown))
-        prompt.show()
-        prompt.raise_()
-        prompt.activateWindow()
-        QApplication.alert(prompt, 0)
 
     def _clear_meeting_prompt(self, prompt):
         if self._meeting_prompt is prompt:
@@ -323,17 +337,8 @@ class MainWindow(QMainWindow):
 
     def _start_detected_meeting(self):
         prompt = self._meeting_prompt
-        if prompt is not None and prompt.countdown_elapsed:
-            active = {candidate.key for candidate in self._meeting_detector.scan()}
-            if prompt.candidate.key not in active:
-                self._status_bar.showMessage(
-                    "Automatic recording cancelled because the meeting ended", 5000)
-                return
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
-        if not self._is_recording:
-            self._start_recording()
+        if prompt is not None:
+            self._lifecycle._manual_candidate(prompt.candidate.key)
 
     def _build_ui(self):
         central = QWidget()
@@ -363,10 +368,10 @@ class MainWindow(QMainWindow):
         self._btn_rts.setFixedWidth(105)
         self._btn_rts.setToolTip(
             "Live translated subtitles of the system audio while recording. "
-            "Costs Soniox realtime minutes for the length of the call.")
+            "Costs Soniox realtime minutes for the length of the call."
+        )
         self._btn_rts.setChecked(bool(self.config.get("rts_translate")))
-        self._btn_rts.setStyleSheet(
-            ACTIVE_TOGGLE_STYLE if self._btn_rts.isChecked() else "")
+        self._btn_rts.setStyleSheet(ACTIVE_TOGGLE_STYLE if self._btn_rts.isChecked() else "")
         self._btn_rts.clicked.connect(self._toggle_subtitles)
         header.addWidget(self._btn_rts)
 
@@ -375,10 +380,12 @@ class MainWindow(QMainWindow):
         self._btn_live_speakers.setFixedWidth(105)
         self._btn_live_speakers.setToolTip(
             "Label microphone speech as Me and diarize system audio as Remote 1, "
-            "Remote 2, etc. Adds up to two Soniox realtime sessions while recording.")
+            "Remote 2, etc. Adds up to two Soniox realtime sessions while recording."
+        )
         self._btn_live_speakers.setChecked(bool(self.config.get("live_speakers")))
         self._btn_live_speakers.setStyleSheet(
-            ACTIVE_TOGGLE_STYLE if self._btn_live_speakers.isChecked() else "")
+            ACTIVE_TOGGLE_STYLE if self._btn_live_speakers.isChecked() else ""
+        )
         self._btn_live_speakers.clicked.connect(self._toggle_live_speakers)
         header.addWidget(self._btn_live_speakers)
 
@@ -455,10 +462,8 @@ class MainWindow(QMainWindow):
         # --- Live subtitles, only while they are wanted ---
         self._subtitles = SubtitleView()
         self._subtitles.speaker_names_requested.connect(self._name_speakers)
-        self._subtitles.set_speaker_mapping_visible(
-            self._btn_live_speakers.isChecked())
-        self._subtitles.setVisible(
-            self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
+        self._subtitles.set_speaker_mapping_visible(self._btn_live_speakers.isChecked())
+        self._subtitles.setVisible(self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
         layout.addWidget(self._subtitles, stretch=1)
 
         # --- Status bar ---
@@ -466,7 +471,8 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._browser_status_label = QLabel()
         self._browser_status_label.setToolTip(
-            "The browser companion sends a local heartbeat when it is installed and enabled.")
+            "The browser companion sends a local heartbeat when it is installed and enabled."
+        )
         self._status_bar.addPermanentWidget(self._browser_status_label)
         # Permanent (right-aligned) version label, not cleared by transient messages.
         version_label = QLabel(f"v{__version__}")
@@ -478,36 +484,68 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._update_timer)
 
     def _toggle_recording(self):
-        if self._is_recording:
+        if self._lifecycle.controller.state == "capture-unresolved":
+            self._retry_capture_stop()
+        elif self._is_recording:
             self._stop_recording()
         else:
             self._start_recording()
 
     def _start_recording(self):
         if self._dictation_active:
-            self._stop_dictation()
-        self._player.stop_playback()
-        try:
-            self._capture = create_backend()
-            self._capture.set_level_callbacks(
-                lambda lvl: self._system_level_signal.emit(lvl),
-                lambda lvl: self._mic_level_signal.emit(lvl),
-            )
-            self._capture.set_error_callback(
-                lambda message: self._capture_error_signal.emit(message)
-            )
-            self._capture.start(
-                tmp_dir=self.config["output_dir"],
-                system_source=self.config.get("system_source_name"),
-                mic_source=self.config.get("mic_source_name"),
-            )
-        except CaptureError as e:
-            QMessageBox.critical(self, "Recording Error", str(e))
+            self._status_bar.showMessage("Stop dictation before recording", 5000)
             return
-        except Exception as e:
-            QMessageBox.critical(self, "Recording Error", f"Failed to start recording:\n{e}")
-            return
+        self._lifecycle.controller.blocked = self._recording_start_blocked()
+        self._lifecycle.controller.start(manual=True)
+        self._lifecycle.process()
 
+    def _automatic_capture_ready(self):
+        return capture_readiness(self.config, self._last_capture_test, capture_runtime())
+
+    def _test_audio(self):
+        if self._lifecycle.controller.state != "idle" or self._dictation_active:
+            self._status_bar.showMessage("Stop the current audio operation before testing", 5000)
+            return
+        self._start_recording()
+        recording = self._lifecycle.controller.recording
+        self._diagnostic_recording = recording
+
+    def _begin_capture(self, recording):
+        self._player.stop_playback()
+        self._recording_config[recording] = dict(self.config)
+        if self._lifecycle.controller.origin == "automatic":
+            self._recording_config[recording]["_automatic_capture"] = True
+            if self._last_capture_test:
+                self._recording_config[recording]["_verified_sources"] = (
+                    self._last_capture_test.get("system"),
+                    self._last_capture_test.get("mic"),
+                )
+        self._btn_record.setEnabled(False)
+        self._status_bar.showMessage("Starting capture…")
+        self._capture_session.start(recording, self._recording_config[recording])
+
+    def _capture_started(self, result):
+        controller = self._lifecycle.controller
+        if result.recording != controller.recording:
+            return
+        controller.started(result.recording, not result.error, result.unresolved)
+        if result.error:
+            self.config["capture_readiness"] = None
+            self._last_capture_test = None
+            save_config(self.config)
+            self._btn_record.setEnabled(True)
+            if result.unresolved:
+                self._btn_record.setText("Retry Stop")
+            self._status_bar.showMessage(f"Capture failed: {result.error}")
+            self._lifecycle.notify("error", "Recording could not start", body=result.error)
+            self._show_recording_error("Recording could not start", result.error)
+            if not result.unresolved:
+                self._recording_config.pop(result.recording, None)
+            self._lifecycle.process()
+            self._finish_pending_quit()
+            return
+        self._capture = result.backend
+        self._btn_record.setEnabled(True)
         system_name = self._capture.active_system_source
         self._level_bars.set_device_names(
             system_name or "not recorded",
@@ -538,7 +576,8 @@ class MainWindow(QMainWindow):
         """)
         if system_name is None:
             self._status_bar.showMessage(
-                "Recording microphone only, no system audio source is configured")
+                "Recording microphone only, no system audio source is configured"
+            )
         else:
             self._status_bar.showMessage("Recording...")
 
@@ -552,6 +591,28 @@ class MainWindow(QMainWindow):
             self._speaker_segments = []
             self._subtitles.set_speaker_mapping_available(0)
             self._start_speaker_recognition(system_name)
+        self._last_capture_test = {
+            "recording": result.recording,
+            "time": time.time(),
+            "runtime": capture_runtime(),
+            "config": {
+                key: self._recording_config[result.recording].get(key)
+                for key in ("output_dir", "system_source_name", "mic_source_name")
+            },
+            "system": self._capture.active_system_source,
+            "mic": self._capture.active_mic_source,
+            "status": "Capture started; audio not yet verified",
+        }
+        self._lifecycle.process()
+        if getattr(self, "_diagnostic_recording", None) == result.recording:
+            QTimer.singleShot(
+                3000,
+                lambda: (
+                    self._stop_recording()
+                    if (self._lifecycle.controller.recording == result.recording)
+                    else None
+                ),
+            )
 
     def _toggle_mute(self):
         if not self._capture:
@@ -578,14 +639,44 @@ class MainWindow(QMainWindow):
             """)
 
     def _stop_recording(self):
-        if not self._capture:
-            return
+        self._lifecycle.controller.stop()
+        self._lifecycle.process()
 
-        system_path, mic_path = self._capture.stop()
-        self._capture.set_system_tap(None)
-        self._capture.set_mic_tap(None)
-        self._capture.close()
+    def _retry_capture_stop(self):
+        self._lifecycle.controller.retry_stop()
+        self._lifecycle.process()
+
+    def _begin_stop(self, recording):
+        self._btn_record.setEnabled(False)
+        self._status_bar.showMessage("Stopping capture…")
+        self._capture_session.stop(recording)
+
+    def _capture_stopped(self, result):
+        controller = self._lifecycle.controller
+        if result.recording != controller.recording:
+            return
+        if result.error:
+            self.config["capture_readiness"] = None
+            if self._last_capture_test:
+                self._last_capture_test["status"] = "Capture shutdown unresolved"
+            save_config(self.config)
+            controller.stopped(result.recording, success=False)
+            self._btn_record.setText("Retry Stop")
+            self._btn_record.setEnabled(True)
+            self._status_bar.showMessage(f"Capture shutdown unresolved: {result.error}")
+            self._lifecycle.notify("error", "Capture shutdown needs attention", body=result.error)
+            self._show_recording_error(
+                "Capture shutdown is unresolved. Use Retry Stop before starting again.",
+                result.error,
+            )
+            self._lifecycle.process()
+            return
+        if self._last_capture_test and self._last_capture_test.get("recording") == result.recording:
+            self._last_capture_test["frames"] = dict(result.frames)
+        system_path, mic_path = result.paths
         self._capture = None
+        controller.stopped(result.recording, has_audio=bool(mic_path))
+        self._btn_record.setEnabled(True)
         self._stop_speaker_recognition()
 
         self._is_recording = False
@@ -605,7 +696,8 @@ class MainWindow(QMainWindow):
         # system_path is None on a microphone-only recording, which the encoder handles.
         if mic_path:
             output_name = self._manager.generate_filename()
-            output_path = os.path.join(self.config["output_dir"], output_name)
+            capture_config = self._recording_config.pop(result.recording)
+            output_path = os.path.join(capture_config["output_dir"], output_name)
             pending = {
                 "subtitles": self._finish_subtitles(),
                 "speakers": self._speaker_sidecar_payload(),
@@ -617,52 +709,131 @@ class MainWindow(QMainWindow):
 
             thread = QThread()
             worker = EncoderWorker(
-                system_path, mic_path, output_path,
-                self.config.get("system_volume", 1.0),
-                self.config.get("mic_volume", 1.0),
+                system_path,
+                mic_path,
+                output_path,
+                capture_config.get("system_volume", 1.0),
+                capture_config.get("mic_volume", 1.0),
             )
             worker.moveToThread(thread)
             thread.started.connect(worker.run)
             worker.finished.connect(self._on_encode_finished)
-            worker.error.connect(self._on_encode_error)
-            worker.error.connect(
-                lambda error, path=output_path: self._pending_sidecars.pop(path, None))
+            worker.error.connect(lambda error, path=output_path: self._on_encode_error(error, path))
             worker.finished.connect(thread.quit)
             worker.error.connect(thread.quit)
             entry = (thread, worker)
-            self._active_encoders.append(entry)
+            self._encoding_ids[output_path] = (result.recording, worker)
+            self._encoder_queue.append(entry)
             thread.finished.connect(lambda e=entry: self._cleanup_encoder(e))
-            thread.start()
+            self._start_next_encoder()
         else:
             self._finish_subtitles()
             self._status_bar.showMessage("Recording cancelled (no audio)")
+            self._recording_config.pop(result.recording, None)
+        self._lifecycle.process()
+        self._finish_pending_quit()
 
-    def _on_capture_error(self, message):
-        if not self._is_recording:
+    def _on_capture_error(self, recording, message):
+        controller = self._lifecycle.controller
+        if recording != controller.recording:
             return
-        log.error("capture failed while recording: %s", message)
-        self._stop_recording()
-        QMessageBox.warning(
-            self,
-            "Recording Stopped",
-            f"{message}\n\nRecording stopped immediately; a partial recording is being saved.",
-        )
+        if controller.state == "starting":
+            # The native backend can fail before its successful start reaches Qt.
+            controller.cancel()
+        elif self._is_recording:
+            self._partial_recordings.add(recording)
+            self._stop_recording()
+        self.config["capture_readiness"] = None
+        if self._last_capture_test:
+            self._last_capture_test["status"] = "Capture failed"
+        save_config(self.config)
+        self._status_bar.showMessage(f"Capture failed: {message}")
+        self._lifecycle.notify("error", "Capture interrupted", body=message)
+
+    def _start_next_encoder(self):
+        if not self._active_encoders and self._encoder_queue:
+            entry = self._encoder_queue.popleft()
+            self._active_encoders.append(entry)
+            entry[0].start()
+
+    def _background_threads_running(self):
+        return self._processing.is_running()
+
+    def _finish_pending_quit(self):
+        if (
+            self._quitting
+            and not self._active_encoders
+            and not self._encoder_queue
+            and (self._lifecycle.controller.state == "idle")
+        ):
+            QTimer.singleShot(0, self.close)
 
     def _cleanup_encoder(self, entry):
         if entry in self._active_encoders:
             self._active_encoders.remove(entry)
+        entry[0].deleteLater()
+        self._start_next_encoder()
+        self._finish_pending_quit()
 
     def _on_encode_finished(self, path):
+        recording, worker = self._encoding_ids.pop(path)
+        self._lifecycle.controller.finalized(recording)
+        partial = recording in self._partial_recordings
+        self._partial_recordings.discard(recording)
+        title = "Partial recording saved" if partial else "Recording saved"
+        self._lifecycle.notify("saved", title, path)
+        if self._last_capture_test and self._last_capture_test.get("recording") == recording:
+            self._last_capture_test["status"] = title + "; encoded audio validated"
+            self.config["capture_readiness"] = {
+                key: value for key, value in self._last_capture_test.items() if key != "recording"
+            }
+            save_config(self.config)
         companions = self._write_pending_sidecars(path)
         suffix = f" with {len(companions)} live transcript files" if companions else ""
-        self._status_bar.showMessage(
-            f"Saved: {os.path.basename(path)}{suffix}", 5000)
+        self._status_bar.showMessage(f"Saved: {os.path.basename(path)}{suffix}", 5000)
         self._refresh_list()
-        self._recording_list.highlight_path(path)
+        if not self._is_recording:
+            self._recording_list.highlight_path(path)
+        if worker.result.cleanup_errors:
+            self._status_bar.showMessage("Saved; temporary audio cleanup needs attention")
 
-    def _on_encode_error(self, error):
-        self._status_bar.showMessage("Encoding failed")
-        QMessageBox.warning(self, "Encoding Error", f"Failed to encode M4A:\n{error}")
+    def _on_encode_error(self, error, path):
+        self.config["capture_readiness"] = None
+        save_config(self.config)
+        recording, worker = self._encoding_ids.pop(path)
+        if self._last_capture_test and self._last_capture_test.get("recording") == recording:
+            self._last_capture_test["status"] = "Encoding failed"
+        self._lifecycle.controller.finalized(recording)
+        self._partial_recordings.discard(recording)
+        # Keep same-run transcript payloads with the recoverable source files.
+        detail = f"{error}\nRetained audio: {worker.system_path}, {worker.mic_path}"
+        self._lifecycle.notify("error", "Recording was not saved", body=detail)
+        self._status_bar.showMessage("Encoding failed; source audio retained")
+        self._show_recording_error("Recording was not saved. Source audio was retained.", detail)
+
+    def _show_recording_error(self, message, detail):
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Recording recovery")
+        dialog.setText(message)
+        dialog.setDetailedText(detail)
+        dialog.setModal(False)
+        self._error_dialogs.append(dialog)
+        dialog.finished.connect(lambda: self._error_dialogs.remove(dialog))
+        dialog.show()
+
+    def _open_saved(self, path, reveal=False):
+        if not os.path.isfile(path):
+            self._status_bar.showMessage("Recording was moved or deleted", 5000)
+            return
+        if reveal:
+            if sys.platform == "darwin":
+                from AppKit import NSWorkspace
+
+                NSWorkspace.sharedWorkspace().selectFile_inFileViewerRootedAtPath_(path, "")
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _update_timer(self):
         if self._recording_start_time:
@@ -694,7 +865,8 @@ class MainWindow(QMainWindow):
     def _move_recording(self, path):
         if path in self._busy_paths:
             QMessageBox.warning(
-                self, "Busy", "This recording is being processed. Wait until it finishes.")
+                self, "Busy", "This recording is being processed. Wait until it finishes."
+            )
             return
         if self._player.current_path == path:
             self._player.stop_playback()
@@ -702,7 +874,9 @@ class MainWindow(QMainWindow):
 
         last_move_dir = self.config.get("last_move_dir", os.path.dirname(path))
         dest_dir = QFileDialog.getExistingDirectory(
-            self, "Move recording to...", last_move_dir,
+            self,
+            "Move recording to...",
+            last_move_dir,
         )
         if not dest_dir:
             return
@@ -725,11 +899,13 @@ class MainWindow(QMainWindow):
     def _delete_recording(self, path):
         if path in self._busy_paths:
             QMessageBox.warning(
-                self, "Busy", "This recording is being processed. Wait until it finishes.")
+                self, "Busy", "This recording is being processed. Wait until it finishes."
+            )
             return
         name = os.path.basename(path)
         reply = QMessageBox.question(
-            self, "Delete Recording",
+            self,
+            "Delete Recording",
             f"Delete '{name}' and its transcript?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -741,13 +917,16 @@ class MainWindow(QMainWindow):
             self._refresh_list()
 
     def _transcribe_recording(self, path):
+        if self._quitting:
+            return
         if path in self._busy_paths:
             QMessageBox.warning(self, "Busy", "This recording is already being processed.")
             return
         api_key = secrets.get_api_key()
         if not api_key:
             QMessageBox.warning(
-                self, "API Key Missing",
+                self,
+                "API Key Missing",
                 "Soniox API key not configured.\nEnter it in Settings, or set the "
                 "SONIOX_API_KEY environment variable.",
             )
@@ -758,39 +937,39 @@ class MainWindow(QMainWindow):
         hints = [] if lang == "auto" else [lang]
         translate = self.config.get("enable_translation", False) and lang != "auto"
 
-        self._transcribe_thread = QThread()
         worker = SonioxWorker(
-            api_key=api_key,
-            audio_path=path,
-            language_hints=hints,
-            primary_language=lang,
-            enable_translation=translate,
+            api_key=api_key, audio_path=path, language_hints=hints,
+            primary_language=lang, enable_translation=translate,
         )
-        worker.moveToThread(self._transcribe_thread)
-        self._transcribe_thread.started.connect(worker.run)
-        worker.progress.connect(lambda msg: self._status_bar.showMessage(msg))
-        worker.completed.connect(self._on_transcribe_finished)
-        worker.error.connect(self._on_transcribe_error)
-        worker.completed.connect(self._transcribe_thread.quit)
-        worker.error.connect(self._transcribe_thread.quit)
-        self._transcribe_worker = worker
-        self._transcribe_path = path
         self._busy_paths.add(path)
-        self._transcribe_thread.start()
+        self._processing.enqueue("transcribe", path, worker)
 
-        self._status_bar.showMessage("Starting transcription...")
+    def _on_processing_progress(self, path, message):
+        self._recording_list.set_processing(path, message, busy=True)
+        self._status_bar.showMessage(f"{os.path.basename(path)}: {message}")
 
-    def _on_transcribe_finished(self, transcript_path):
-        self._busy_paths.discard(self._transcribe_path)
-        self._status_bar.showMessage(f"Transcript saved: {os.path.basename(transcript_path)}", 5000)
+    def _on_processing_completed(self, kind, path, output):
+        self._busy_paths.discard(path)
+        self._recording_list.set_processing(path, "", busy=False)
         self._refresh_list()
+        self._status_bar.showMessage(f"Saved: {os.path.basename(output)}", 8000)
 
-    def _on_transcribe_error(self, error):
-        self._busy_paths.discard(self._transcribe_path)
-        self._status_bar.showMessage("Transcription failed")
-        QMessageBox.warning(self, "Transcription Error", f"Soniox transcription failed:\n{error}")
+    def _on_processing_failed(self, kind, path, error):
+        self._busy_paths.discard(path)
+        self._refresh_list()
+        self._recording_list.set_processing(path, "Failed — retry or see error details", busy=False)
+        self._status_bar.showMessage(f"Processing failed: {os.path.basename(path)}")
+        # Non-modal: one failed queued job must not stall other jobs or shutdown.
+        title = "Transcription Error" if kind == "transcribe" else "Cleanup Error"
+        dialog = QMessageBox(QMessageBox.Icon.Warning, title, str(error), parent=self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._error_dialogs.append(dialog)
+        dialog.destroyed.connect(lambda: self._error_dialogs.remove(dialog))
+        dialog.show()
 
     def _cleanup_recording(self, path):
+        if self._quitting:
+            return
         if path in self._busy_paths:
             QMessageBox.warning(self, "Busy", "This recording is already being processed.")
             return
@@ -802,49 +981,19 @@ class MainWindow(QMainWindow):
         summary_path = os.path.splitext(path)[0] + ".summary.md"
         if os.path.exists(summary_path):
             reply = QMessageBox.question(
-                self, "Already Processed",
+                self,
+                "Already Processed",
                 "A summary file already exists. Overwrite?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
-        self._cleanup_thread = QThread()
         worker = CleanupWorker(
-            transcript_path, self.config.get("summary_prompt", DEFAULT_SUMMARY_PROMPT))
-        worker.moveToThread(self._cleanup_thread)
-        self._cleanup_thread.started.connect(worker.run)
-        worker.progress.connect(lambda msg: self._status_bar.showMessage(msg))
-        worker.completed.connect(self._on_cleanup_finished)
-        worker.error.connect(self._on_cleanup_error)
-        worker.completed.connect(self._cleanup_thread.quit)
-        worker.error.connect(self._cleanup_thread.quit)
-        self._cleanup_worker = worker
-        self._cleanup_path = path
+            transcript_path, self.config.get("summary_prompt", DEFAULT_SUMMARY_PROMPT)
+        )
         self._busy_paths.add(path)
-        self._cleanup_thread.start()
-
-        self._cleanup_start_time = time.time()
-        self._cleanup_timer = QTimer(self)
-        self._cleanup_timer.timeout.connect(self._update_cleanup_status)
-        self._cleanup_timer.start(1000)
-        self._status_bar.showMessage("Running Claude cleanup... (0s)")
-
-    def _update_cleanup_status(self):
-        elapsed = int(time.time() - self._cleanup_start_time)
-        self._status_bar.showMessage(f"Running Claude cleanup... ({elapsed}s)")
-
-    def _on_cleanup_finished(self, path):
-        self._busy_paths.discard(self._cleanup_path)
-        self._cleanup_timer.stop()
-        elapsed = int(time.time() - self._cleanup_start_time)
-        self._status_bar.showMessage(f"Cleanup done in {elapsed}s: {os.path.basename(path)}", 8000)
-
-    def _on_cleanup_error(self, error):
-        self._busy_paths.discard(self._cleanup_path)
-        self._cleanup_timer.stop()
-        self._status_bar.showMessage("Cleanup failed")
-        QMessageBox.warning(self, "Cleanup Error", f"Claude cleanup failed:\n{error}")
+        self._processing.enqueue("cleanup", path, worker)
 
     def _toggle_subtitles(self):
         wanted = self._btn_rts.isChecked()
@@ -875,8 +1024,7 @@ class MainWindow(QMainWindow):
         api_key = secrets.get_api_key()
         if not api_key:
             self._subtitles.set_status("Live subtitles need a Soniox API key")
-            self._status_bar.showMessage(
-                "Subtitles are off: no Soniox API key is configured", 8000)
+            self._status_bar.showMessage("Subtitles are off: no Soniox API key is configured", 8000)
             return
 
         try:
@@ -887,19 +1035,23 @@ class MainWindow(QMainWindow):
             self._subtitle_engine = SubtitleEngine(
                 api_key=api_key,
                 translate_to=self.config.get("translation_target"),
-                source_languages=self._source_languages())
+                source_languages=self._source_languages(),
+            )
         except ValueError as e:
             self._subtitles.set_status(str(e))
             return
 
         target = self._subtitle_engine.target_language
         self._subtitles.set_status(
-            f"Live subtitles, translated into {language_name(target)}" if target
-            else "Live subtitles, not translated")
+            f"Live subtitles, translated into {language_name(target)}"
+            if target
+            else "Live subtitles, not translated"
+        )
         self._subtitle_engine.line_finalized.connect(self._subtitles.append_line)
         self._subtitle_engine.line_updated.connect(self._subtitles.set_pending)
         self._subtitle_engine.notice.connect(
-            lambda message: self._status_bar.showMessage(message, 8000))
+            lambda message: self._status_bar.showMessage(message, 8000)
+        )
         self._subtitle_engine.error_occurred.connect(self._on_subtitle_error)
         self._subtitle_engine.start()
         self._refresh_audio_taps()
@@ -918,15 +1070,15 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Live speaker recognition stopped", 5000)
 
     def _update_live_view_visibility(self):
-        self._subtitles.setVisible(
-            self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
+        self._subtitles.setVisible(self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
 
     def _start_speaker_recognition(self, system_source_name):
         api_key = secrets.get_api_key()
         if not api_key:
             self._subtitles.set_status("Live speaker labels need a Soniox API key")
             self._status_bar.showMessage(
-                "Speaker labels are off: no Soniox API key is configured", 8000)
+                "Speaker labels are off: no Soniox API key is configured", 8000
+            )
             return
 
         languages = self._source_languages()
@@ -945,13 +1097,14 @@ class MainWindow(QMainWindow):
                 enable_speaker_diarization=True,
             )
 
-        engines = [engine for engine in
-                   (self._mic_speaker_engine, self._remote_speaker_engine)
-                   if engine is not None]
+        engines = [
+            engine
+            for engine in (self._mic_speaker_engine, self._remote_speaker_engine)
+            if engine is not None
+        ]
         for engine in engines:
             engine.speaker_line_finalized.connect(self._on_speaker_line)
-            engine.notice.connect(
-                lambda message: self._status_bar.showMessage(message, 8000))
+            engine.notice.connect(lambda message: self._status_bar.showMessage(message, 8000))
             engine.error_occurred.connect(self._on_subtitle_error)
             engine.start()
 
@@ -987,23 +1140,23 @@ class MainWindow(QMainWindow):
     def _on_speaker_line(self, timestamp, speaker_id, text):
         if speaker_id != "Me":
             self._observed_remote_speakers.add(speaker_id)
-            self._subtitles.set_speaker_mapping_available(
-                len(self._observed_remote_speakers))
+            self._subtitles.set_speaker_mapping_available(len(self._observed_remote_speakers))
         self._subtitles.append_speaker_line(
-            timestamp, resolve_speaker(speaker_id, self._speaker_name_map), text)
+            timestamp, resolve_speaker(speaker_id, self._speaker_name_map), text
+        )
 
     def _name_speakers(self):
         if not self._observed_remote_speakers:
             return
-        dialog = SpeakerMappingDialog(
-            self._observed_remote_speakers, self._speaker_name_map, self)
+        dialog = SpeakerMappingDialog(self._observed_remote_speakers, self._speaker_name_map, self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         for speaker_id in self._observed_remote_speakers:
             self._speaker_name_map.pop(speaker_id, None)
         self._speaker_name_map.update(dialog.mappings())
         self._status_bar.showMessage(
-            "Speaker names will be used for new live lines and the complete sidecar", 6000)
+            "Speaker names will be used for new live lines and the complete sidecar", 6000
+        )
 
     def _speaker_sidecar_payload(self):
         lines = [line[1:] for line in self._speaker_segments]
@@ -1074,7 +1227,8 @@ class MainWindow(QMainWindow):
     def _start_dictation(self):
         if self._is_recording:
             QMessageBox.warning(
-                self, "Recording Active", "Stop recording before enabling dictation.")
+                self, "Recording Active", "Stop recording before enabling dictation."
+            )
             self._btn_dictation.setChecked(False)
             return
 
@@ -1118,7 +1272,8 @@ class MainWindow(QMainWindow):
         self._level_bars.set_device_names("", "Dictation mic")
         self._overlay.activate()
         self._status_bar.showMessage(
-            "Dictation ON - Ctrl+Space to dictate, Ctrl+Shift+Space to translate")
+            "Dictation ON - Ctrl+Space to dictate, Ctrl+Shift+Space to translate"
+        )
 
     def _stop_dictation(self):
         if self._dictation:
@@ -1165,7 +1320,8 @@ class MainWindow(QMainWindow):
 
     def _add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Add audio files",
+            self,
+            "Add audio files",
             self.config.get("last_add_dir", ""),
             "Audio files (*.m4a *.mp3 *.wav *.ogg *.flac *.wma *.aac);;All files (*)",
         )
@@ -1180,7 +1336,8 @@ class MainWindow(QMainWindow):
             dest = os.path.join(self.config["output_dir"], os.path.basename(src))
             if os.path.exists(dest):
                 reply = QMessageBox.question(
-                    self, "File Exists",
+                    self,
+                    "File Exists",
                     f"'{os.path.basename(src)}' already exists. Overwrite?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 )
@@ -1199,6 +1356,7 @@ class MainWindow(QMainWindow):
             self,
             browser_bridge=self._browser_meeting_bridge,
             meeting_detector=self._native_meeting_detector,
+            lifecycle=self._lifecycle,
         )
         if dialog.exec():
             self.config = dialog.get_config()
@@ -1209,32 +1367,29 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Settings saved", 3000)
 
     def closeEvent(self, event):
-        if (self._tray_icon is not None and self._tray_icon.isVisible()
-                and event.spontaneous() and not self._quitting):
+        if (
+            not self._quitting
+            and event.spontaneous()
+            and self._tray_icon is not None
+            and self._tray_icon.isVisible()
+        ):
             self.hide()
-            self._tray_icon.showMessage(
-                "Meeting Recorder is still running",
-                "Meeting detection remains active in the menu bar. Choose Quit there to exit.",
-                QSystemTrayIcon.MessageIcon.Information,
-                5000,
-            )
             event.ignore()
             return
-        if self._is_recording:
-            reply = QMessageBox.question(
-                self, "Recording in Progress",
-                "A recording is in progress. Stop and exit?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.No:
-                self._quitting = False
+        self._quitting = True
+        if hasattr(self, "_lifecycle"):
+            self._lifecycle.controller.shutdown()
+            self._lifecycle.process()
+            if self._lifecycle.controller.state != "idle":
                 event.ignore()
                 return
-            self._stop_recording()
-        if self._active_encoders or self._busy_paths:
-            self._quitting = False
-            self._status_bar.showMessage(
-                "Finishing background work before exit. Close again when it is done.", 8000)
+        if (
+            self._active_encoders
+            or self._busy_paths
+            or getattr(self, "_encoder_queue", ())
+            or (hasattr(self, "_processing") and self._background_threads_running())
+        ):
+            self._status_bar.showMessage("Finishing background work before exit.", 8000)
             event.ignore()
             return
         if self._dictation_active:
@@ -1244,10 +1399,11 @@ class MainWindow(QMainWindow):
         self._meeting_timer.stop()
         self._browser_meeting_bridge.stop()
         self._calendar_meeting_detector.stop()
+        self._lifecycle.close()
+        self._capture_session.close()
         if self._tray_icon is not None:
             self._tray_icon.hide()
-        # The filter is installed on the whole application, so it goes on being called
-        # after this window is gone. Qt then calls it on a half-destroyed object and
-        # aborts the process.
         QApplication.instance().removeEventFilter(self._hotkey_filter)
+        self._exit_ready = True
         event.accept()
+        QTimer.singleShot(0, QApplication.instance().quit)

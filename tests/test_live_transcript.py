@@ -87,7 +87,7 @@ class TestSidecars:
         recording = self.make(tmp_path, "call", SIDECAR_SUFFIXES)
         assert {p.name for p in sidecars(recording)} == {
             "call.md", "call.summary.md", "call.live.md",
-            "call.speakers.md", "call.speakers.json"}
+            "call.speakers.md", "call.speakers.json", "call.transcription.json"}
 
     def test_missing_companions_are_not_invented(self, tmp_path):
         recording = self.make(tmp_path, "call", [".md"])
@@ -108,7 +108,7 @@ class TestSidecars:
 
         assert {p.name for p in tmp_path.iterdir()} == {
             "new.m4a", "new.md", "new.summary.md", "new.live.md",
-            "new.speakers.md", "new.speakers.json"}
+            "new.speakers.md", "new.speakers.json", "new.transcription.json"}
 
     def test_rename_keeps_the_compound_suffixes_intact(self, tmp_path):
         recording = self.make(tmp_path, "old", [".summary.md", ".live.md"])

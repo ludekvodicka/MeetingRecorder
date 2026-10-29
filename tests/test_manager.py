@@ -50,7 +50,7 @@ class TestScan:
 class TestGenerateFilename:
     def test_shape(self, tmp_path):
         name = RecordingManager(str(tmp_path)).generate_filename()
-        assert re.fullmatch(r"Recording \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.m4a", name)
+        assert re.fullmatch(r"Recording \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} [a-f0-9]{8}\.m4a", name)
 
 
 class TestDelete:
@@ -93,3 +93,16 @@ class TestRename:
             manager.rename(str(tmp_path / "one.m4a"), "two")
 
         assert (tmp_path / "one.m4a").exists()
+
+
+@pytest.mark.parametrize('stage,label', [
+    ('polling_original_id', 'Saved job'),
+    ('submitting_original_id', 'Request status unknown'),
+])
+def test_scan_shows_recoverable_or_uncertain_job(tmp_path, stage, label):
+    import json
+
+    make_recording(tmp_path, 'meeting')
+    (tmp_path / 'meeting.transcription.json').write_text(json.dumps({'stage': stage}))
+    recording = RecordingManager(str(tmp_path)).scan()[0]
+    assert label in recording.transcription_status

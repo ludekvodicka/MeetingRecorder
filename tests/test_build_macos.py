@@ -60,6 +60,8 @@ def test_macos_dmg_stages_the_browser_companion_and_quick_start(tmp_path):
     assert (target / "Meeting Recorder.app").is_dir()
     assert (target / "Meeting Recorder Browser Extension" / "manifest.json").is_file()
     assert (target / "READ ME - Next Meeting.md").is_file()
+    assert (target / "native-call-test-checklist.md").is_file()
+    assert (target / "native-lifecycle.md").is_file()
     assert (target / "Applications").is_symlink()
 
 

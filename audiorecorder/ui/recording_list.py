@@ -49,8 +49,9 @@ class RecordingItemWidget(QWidget):
             status = QLabel("Transcribed")
             status.setStyleSheet("color: #66bb6a; font-size: 11px;")
         else:
-            status = QLabel("Not transcribed")
+            status = QLabel(self.recording.transcription_status or "Not transcribed")
             status.setStyleSheet("color: #888; font-size: 11px;")
+        self._status_label = status
         bottom.addWidget(status)
 
         date_str = self.recording.date.strftime("%Y-%m-%d %H:%M")
@@ -65,6 +66,7 @@ class RecordingItemWidget(QWidget):
         self._btn_play.clicked.connect(self._on_play_clicked)
         bottom.addWidget(self._btn_play)
 
+        self._processing_buttons = []
         if self.recording.is_transcribed:
             btn_open = QPushButton("Open")
             btn_open.setFixedWidth(50)
@@ -77,12 +79,15 @@ class RecordingItemWidget(QWidget):
             btn_cleanup.setStyleSheet("QPushButton { color: #64b5f6; }")
             btn_cleanup.clicked.connect(lambda: self.cleanup_clicked.emit(self.recording.path))
             bottom.addWidget(btn_cleanup)
+            self._processing_buttons.append(btn_cleanup)
         else:
-            btn_transcribe = QPushButton("Transcribe")
+            btn_transcribe = QPushButton(
+                "Resume" if self.recording.transcription_status else "Transcribe")
             btn_transcribe.setFixedWidth(75)
             btn_transcribe.clicked.connect(
                 lambda: self.transcribe_clicked.emit(self.recording.path))
             bottom.addWidget(btn_transcribe)
+            self._processing_buttons.append(btn_transcribe)
 
         btn_move = QPushButton("Move")
         btn_move.setFixedWidth(50)
@@ -94,8 +99,17 @@ class RecordingItemWidget(QWidget):
         btn_delete.setStyleSheet("QPushButton { color: #ef5350; }")
         btn_delete.clicked.connect(lambda: self.delete_clicked.emit(self.recording.path))
         bottom.addWidget(btn_delete)
+        self._processing_buttons.extend([btn_move, btn_delete])
 
         layout.addLayout(bottom)
+
+    def set_processing(self, message, busy):
+        self._status_label.setText(
+            message or ("Transcribed" if self.recording.is_transcribed
+                        else self.recording.transcription_status or "Not transcribed")
+        )
+        for button in self._processing_buttons:
+            button.setEnabled(not busy)
 
     def _on_play_clicked(self):
         if self._is_playing:
@@ -183,6 +197,7 @@ class RecordingListWidget(QWidget):
         layout.addWidget(self._empty_label)
 
         self._item_widgets = []
+        self._processing_states = {}
 
     def set_recordings(self, recordings):
         self._list.clear()
@@ -192,6 +207,8 @@ class RecordingListWidget(QWidget):
 
         for rec in recordings:
             item_widget = RecordingItemWidget(rec)
+            if rec.path in self._processing_states:
+                item_widget.set_processing(*self._processing_states[rec.path])
             item_widget.play_clicked.connect(self.play_requested.emit)
             item_widget.stop_clicked.connect(self.stop_requested.emit)
             item_widget.transcribe_clicked.connect(self.transcribe_requested.emit)
@@ -204,6 +221,15 @@ class RecordingListWidget(QWidget):
             item.setSizeHint(item_widget.sizeHint())
             self._list.setItemWidget(item, item_widget)
             self._item_widgets.append(item_widget)
+
+    def set_processing(self, path, message, busy):
+        if message:
+            self._processing_states[path] = (message, busy)
+        else:
+            self._processing_states.pop(path, None)
+        for widget in self._item_widgets:
+            if widget.recording.path == path:
+                widget.set_processing(message, busy)
 
     def set_playing_path(self, path):
         for w in self._item_widgets:

@@ -58,7 +58,8 @@ class TestDefaults:
 
     def test_summary_prompt_carries_both_placeholders(self):
         formatted = config.DEFAULT_SUMMARY_PROMPT.format(
-            transcript_name="a.md", summary_name="a.summary.md")
+            transcript_name="a.md", summary_name="a.summary.md"
+        )
         assert "a.md" in formatted
         assert "a.summary.md" in formatted
 
@@ -92,3 +93,46 @@ class TestDefaults:
     def test_the_speaker_toggle_survives_a_restart(self, isolated_config):
         config.save_config({**config.DEFAULTS, "live_speakers": True})
         assert config.load_config()["live_speakers"] is True
+
+
+@pytest.mark.parametrize("stored", ["{broken", "[]", "null"])
+def test_corrupt_config_is_preserved_and_automation_stays_off(isolated_config, stored):
+    isolated_config.parent.mkdir(parents=True)
+    isolated_config.write_text(stored)
+    cfg = config.load_config()
+    assert not cfg["automatic_recording"] and not cfg["auto_stop_recording"]
+    assert isolated_config.read_text() == stored
+    assert next(isolated_config.parent.glob("config.invalid-*.json")).read_text() == stored
+
+
+@pytest.mark.parametrize("value", [True, False, "5", -1, 0, 121, None, 5.5])
+def test_invalid_delay_never_becomes_an_immediate_command(value):
+    cfg = config.validated_config({"auto_start_delay_seconds": value, "automatic_recording": "yes"})
+    assert cfg["auto_start_delay_seconds"] == 5
+    assert not cfg["automatic_recording"]
+
+
+def test_atomic_save_failure_preserves_previous_file(isolated_config, monkeypatch):
+    config.save_config({"language": "cs"})
+    before = isolated_config.read_bytes()
+    monkeypatch.setattr(config.os, "replace", lambda *args: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(OSError):
+        config.save_config({"language": "en"})
+    assert isolated_config.read_bytes() == before
+    assert not list(isolated_config.parent.glob(".config-*"))
+
+
+def test_corrupt_capture_evidence_cannot_break_settings_or_qualify_automation():
+    for value in (
+        {},
+        {"config": {}, "frames": {}, "time": None},
+        {"config": {}, "frames": {}, "time": float("nan")},
+    ):
+        assert config.validated_config({"capture_readiness": value})["capture_readiness"] is None
+
+
+def test_qualification_dictionaries_are_not_shared_defaults():
+    first = config.validated_config({})
+    first["native_call_qualifications"]["app"] = "x"
+    assert not config.validated_config({})["native_call_qualifications"]
+    assert not config.DEFAULTS["native_call_qualifications"]

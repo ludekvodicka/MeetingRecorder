@@ -3,12 +3,12 @@
 import logging
 import os
 import platform
-import time
+import uuid
 
 import sounddevice as sd
 import soundfile as sf
 
-from audiorecorder.audio.backend import CaptureError
+from audiorecorder.audio.backend import CaptureError, CaptureUnresolved
 from audiorecorder.audio.backend_portaudio import PortAudioBackend
 from audiorecorder.audio.device_selection import macos_builtin_microphones
 
@@ -92,19 +92,27 @@ class MacOSBackend(PortAudioBackend):
         )
         self._prepare_tap(CAPTURE_RATE)
 
+    def resolve_sources(self, system_source, mic_source):
+        if system_source is None and native_system_audio_supported():
+            return NATIVE_SYSTEM_SOURCE, self._resolve_microphone(mic_source)[1]["name"]
+        return super().resolve_sources(system_source, mic_source)
+
     def start(self, tmp_dir, system_source, mic_source):
         if system_source is not None or not native_system_audio_supported():
             return super().start(tmp_dir, system_source, mic_source)
         if self._is_recording:
             return
 
-        stamp = int(time.time())
+        stamp = uuid.uuid4().hex
         try:
             self._open_native_system(tmp_dir, stamp)
             self._open_microphone(tmp_dir, mic_source, stamp)
             self._start_open_streams()
+        except CaptureUnresolved:
+            self._is_recording = True
+            raise
         except Exception as err:
-            self._discard_partial_start()
+            self._cleanup_failed_start(err)
             if isinstance(err, CaptureError):
                 raise
             raise CaptureError(f"Failed to start recording: {err}") from err

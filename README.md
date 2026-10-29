@@ -1,5 +1,52 @@
 # Meeting Recorder
 
+## Headless transcription
+
+Run from a source checkout with dependencies installed:
+
+```sh
+python -m audiorecorder.transcription.cli "/path/to/meeting.m4a" --language auto --json
+```
+
+Installing the package also provides `meeting-transcribe` with the same arguments.
+This uploads the specified recording to Soniox using the existing OS keyring credential
+or `SONIOX_API_KEY` (which takes precedence). No GUI, recording device, or prompt is used.
+Credential lookup runs in an isolated subprocess with a ten-second timeout. On macOS,
+Keychain interaction is disabled for this lookup. If access requires approval or unlock,
+the command exits with an error and releases its lock before any upload. Unlock/approve
+the existing credential interactively, or provide `SONIOX_API_KEY` through the job's
+secret environment; never put the key in a command argument, repository, or transcript.
+`--language` overrides the app setting; `auto` enables language identification without a hint.
+The command produces the original-language transcript, without requesting translation.
+To resume a GUI job, keep the same language and translation settings (CLI translation is off).
+`--dry-run` validates the input and destination without reading credentials or uploading.
+`--help` and `--version` are available.
+
+The sibling `.md` is published atomically without overwriting an existing file. Existing
+nonempty transcripts are skipped; empty output files require manual review before retry.
+GUI and CLI jobs share an OS lock in `.transcription.lock`; the small file remains on disk,
+but the OS releases ownership even after a crash. Do not remove it to bypass an active job.
+Legacy `.md.transcribing` files still block processing: verify the old CLI job has stopped
+before removing one.
+
+A sibling `.transcription.json` saves remote file/job IDs and settings, without credentials
+or transcript content. Click **Resume**, or repeat the CLI command with matching settings,
+to retrieve an existing job after a crash or network failure. Jobs are resumed on explicit
+action, never uploaded automatically at startup. If a submission response was lost before
+the job ID was saved, the app stops and asks you to check Soniox rather than submit another
+paid job. Older app versions did not save IDs, so their interrupted jobs cannot be recovered
+from local state. Retrying those recordings may incur another charge.
+
+The GUI queues Transcribe and Cleanup actions and shows progress on each recording.
+Duplicate actions and move/delete are disabled for queued and active recordings. Quit
+waits for the queue and its threads to finish. Checkpoint sidecars follow audio when moved,
+renamed or deleted; lock files remain at their original paths.
+
+Exit codes: `0` completed/skipped/dry-run, `1` operational failure, `2` invalid input,
+`130` interrupted. With `--json`, the final result contains `status`, `audio`, `transcript`
+and an optional `message`. Success results go to stdout, errors and progress to stderr.
+Provider error bodies are not printed because they may contain sensitive data.
+
 [![CI](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/ci.yml)
 [![Release build](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/release.yml/badge.svg)](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/ludekvodicka/MeetingRecorder)](https://github.com/ludekvodicka/MeetingRecorder/releases/latest)
@@ -72,13 +119,28 @@ native-window and Teams-media diagnostic state. If macOS redacts Teams window ti
 detector can still recognize the call-control surface from its non-content window geometry.
 
 On macOS, closing the main window keeps Meeting Recorder in the menu bar so detection remains
-available. Use the menu-bar icon to reopen or explicitly quit it. **Launch at login** is a
+available. Click the menu-bar icon to start or stop recording, or open the app. Quit the app
+from its Dock menu. **Launch at login** is a
 separate opt-in in Settings, managed by macOS Service Management and visible in the system's
 Login Items controls.
 
-Automatic recording is also a separate opt-in. It applies only to a detected app/browser
-call, always shows a 10-second **Cancel** countdown, and cancels if the meeting disappears.
-A Calendar event by itself never starts recording.
+The installed macOS app uses native notification actions, with an in-app fallback when
+notifications are unavailable. Settings reports notification authorization, capture test
+results, selected/resolved devices and observed login-item status. Focus can suppress banners.
+
+Start and stop countdowns default independently to **5 seconds** (configurable from 5–120).
+Automatic recording and automatic stopping are separate opt-ins. The macOS Teams/Zoom
+call-control detector uses Accessibility with explicit inspection opt-in. No app version is
+approved by default: use the temporary supervised test, then approve only after completing
+[the real-call checklist](docs/native-call-test-checklist.md). Approval expires when the app
+version or matcher changes. Unattended capture also requires a successful audio test for this
+build and device configuration. Window/media, Calendar and browser signals remain advisory.
+Unknown or hidden controls preserve recording; optional window-absence stopping has a
+separate test/approval. See [native lifecycle notes](docs/native-lifecycle.md) for boundaries.
+
+Recording startup and shutdown run outside the GUI thread. Saving uses a separate bounded
+encoder queue and atomically publishes validated audio. Empty capture is reported as an
+error; failed encodes retain source WAVs for recovery.
 
 ![Live subtitles during a recording](docs/screenshot-subtitles.png)
 

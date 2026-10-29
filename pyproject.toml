@@ -28,7 +28,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "PyQt6>=6.6",
+    "PyQt6>=6.6 ; sys_platform != 'darwin'",
+    # Qt 6.12 fixes QSystemTrayIcon reading clickCount on a non-mouse event
+    # on macOS 27, which aborts the process when opening the menu-bar menu.
+    "PyQt6>=6.12 ; sys_platform == 'darwin'",
     "numpy>=1.24",
     "soundfile>=0.12",
     "av>=12.0",
@@ -51,6 +54,9 @@ dependencies = [
     "pyobjc-framework-CoreAudio>=10.3 ; sys_platform == 'darwin'",
     "pyobjc-framework-EventKit>=10.3 ; sys_platform == 'darwin'",
     "pyobjc-framework-ServiceManagement>=10.3 ; sys_platform == 'darwin'",
+    "pyobjc-framework-UserNotifications>=10.3 ; sys_platform == 'darwin'",
+    "pyobjc-framework-AVFoundation>=10.3 ; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices>=10.3 ; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
@@ -66,6 +72,9 @@ Issues = "https://github.com/ludekvodicka/MeetingRecorder/issues"
 
 [project.gui-scripts]
 meeting-recorder = "audiorecorder.app:main"
+
+[project.scripts]
+meeting-transcribe = "audiorecorder.transcription.cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "audiorecorder.version.__version__" }

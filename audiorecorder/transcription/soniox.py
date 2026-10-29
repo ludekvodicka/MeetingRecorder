@@ -4,6 +4,7 @@ import time
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from audiorecorder.transcription.jobs import TranscriptionJob, atomic_write
 from audiorecorder.transcription.markdown import (
     detect_dominant_language,
     language_name,
@@ -20,54 +21,71 @@ class SonioxWorker(QObject):
     error = pyqtSignal(str)
 
     def __init__(self, api_key, audio_path, language_hints=None,
-                 primary_language="en", enable_translation=False):
+                 primary_language="en", enable_translation=False, output_path=None):
         super().__init__()
         self.api_key = api_key
         self.audio_path = audio_path
         self.language_hints = language_hints or []
         self.primary_language = primary_language
         self.enable_translation = enable_translation
+        self.output_path = output_path
 
     def run(self):
         try:
-            self.progress.emit("Uploading audio...")
-            file_id = self._upload_file()
+            with TranscriptionJob(self.audio_path).locked() as job:
+                output_path = self.output_path or os.path.splitext(self.audio_path)[0] + ".md"
+                if os.path.exists(output_path):
+                    raise RuntimeError("Transcript already exists; existing output was preserved")
+                options = {
+                    "language_hints": self.language_hints,
+                    "primary_language": self.primary_language,
+                    "enable_translation": self.enable_translation,
+                }
+                state = job.load(options)
+                file_id = state.get("file_id")
+                if not file_id:
+                    self.progress.emit("Uploading audio...")
+                    file_id = self._upload_file()
+                    job.save(state, file_id=file_id, stage="uploaded")
 
-            # First pass: transcribe with language identification
-            self.progress.emit("Transcribing...")
-            trans_id = self._create_transcription(file_id, translate=False)
-            self._poll_status(trans_id)
+                def transcribe(key, **kwargs):
+                    transcription_id = state.get(key)
+                    if not transcription_id:
+                        # A crash/timeout during POST is ambiguous. Persist intent first;
+                        # recovery must never silently submit the same paid job twice.
+                        job.save(state, stage=f"submitting_{key}")
+                        transcription_id = self._create_transcription(file_id, **kwargs)
+                        job.save(state, **{key: transcription_id}, stage=f"polling_{key}")
+                    else:
+                        self.progress.emit("Resuming saved transcription...")
+                    self._poll_status(transcription_id)
+                    self.progress.emit("Fetching transcript...")
+                    tokens = self._get_transcript(transcription_id)
+                    if not any(t.get("text", "").strip() for t in tokens):
+                        raise RuntimeError("Soniox returned an empty transcript")
+                    return tokens
 
-            self.progress.emit("Fetching transcript...")
-            tokens = self._get_transcript(trans_id)
-
-            detected_lang = detect_dominant_language(tokens, fallback=self.primary_language)
-            self.progress.emit(f"Detected language: {detected_lang}")
-
-            output_path = os.path.splitext(self.audio_path)[0] + ".md"
-            target = self.primary_language
-
-            if self.enable_translation and detected_lang != target:
-                self.progress.emit(f"Translating to {language_name(target)}...")
-                trans_id_target = self._create_transcription(file_id, translate=True, target=target)
-                self._poll_status(trans_id_target)
-                tokens_translated = self._get_transcript(trans_id_target)
-                document = render_transcript_with_translation(
-                    tokens, tokens_translated,
-                    source_name=os.path.basename(self.audio_path),
-                    original_lang=detected_lang, translation_lang=target,
-                )
-            else:
-                document = render_transcript(
-                    tokens, source_name=os.path.basename(self.audio_path),
-                    language=detected_lang,
-                )
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(document)
-
+                self.progress.emit("Transcribing...")
+                tokens = transcribe("original_id", translate=False)
+                detected_lang = detect_dominant_language(tokens, fallback=self.primary_language)
+                target = self.primary_language
+                if self.enable_translation and detected_lang != target:
+                    self.progress.emit(f"Translating to {language_name(target)}...")
+                    translated = transcribe("translation_id", translate=True, target=target)
+                    document = render_transcript_with_translation(
+                        tokens, translated, source_name=os.path.basename(self.audio_path),
+                        original_lang=detected_lang, translation_lang=target,
+                    )
+                else:
+                    document = render_transcript(
+                        tokens, source_name=os.path.basename(self.audio_path),
+                        language=detected_lang,
+                    )
+                self.progress.emit("Saving transcript...")
+                atomic_write(output_path, document, replace=False)
+                job.save(state, stage="completed")
             self.progress.emit("Done")
             self.completed.emit(output_path)
-
         except Exception as e:
             self.error.emit(str(e))
 

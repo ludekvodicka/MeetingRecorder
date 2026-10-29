@@ -10,7 +10,7 @@ listen, connect instead to say "you are wanted", and exit.
 
 import logging
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QDir, QLockFile, QObject, pyqtSignal
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 # The original product name, so a copy left running from an older build is still
@@ -32,9 +32,11 @@ class SingleInstance(QObject):
         super().__init__()
         self._name = name
         self._server = None
+        self._lock = QLockFile(QDir.tempPath() + "/" + name + ".lock")
 
     def take_ownership(self):
         """True when this copy is the one that should run."""
+        owned = self._lock.tryLock(0)
         socket = QLocalSocket()
         socket.connectToServer(self._name)
         if socket.waitForConnected(CONNECT_TIMEOUT_MS):
@@ -43,6 +45,11 @@ class SingleInstance(QObject):
             socket.waitForBytesWritten(CONNECT_TIMEOUT_MS)
             socket.disconnectFromServer()
             log.info("another copy is already running, asking it to show itself")
+            if owned:
+                self._lock.unlock()
+            return False
+
+        if not owned:
             return False
 
         # A copy that crashed leaves the name behind on Unix sockets and nothing can bind
@@ -51,13 +58,12 @@ class SingleInstance(QObject):
 
         self._server = QLocalServer(self)
         if not self._server.listen(self._name):
-            # Losing the race is not a reason to refuse to start: better two windows than
-            # none. The hook duplication is the thing worth avoiding, and it is unlikely
-            # enough here to accept.
+            # Arbitration failure must never create a second capture/keyboard-hook owner.
             log.warning("could not claim the single-instance lock: %s",
                         self._server.errorString())
             self._server = None
-            return True
+            self._lock.unlock()
+            return False
 
         self._server.newConnection.connect(self._on_connection)
         return True
@@ -67,3 +73,9 @@ class SingleInstance(QObject):
         if connection is not None:
             connection.disconnectFromServer()
         self.another_instance_started.emit()
+
+    def close(self):
+        if self._server is not None:
+            self._server.close()
+            self._server = None
+        self._lock.unlock()

@@ -27,9 +27,12 @@
    every Mac login. macOS may also show this under **General > Login Items**.
 6. Optionally enable **Use macOS Calendar**. macOS requests Calendar access; this is used only
    to find imminent events with attendees or a supported conference link.
-7. Leave automatic recording off for the first meeting. If you later enable it, only an
-   actual app/browser meeting signal qualifies and a visible 10-second Cancel countdown is
-   always shown. Calendar alone never starts a recording.
+7. Start with manual recording. For native Teams/Zoom automation, complete the
+   [supervised test checklist](native-call-test-checklist.md) before approving your app version.
+   Window/media/browser/Calendar prompts remain advisory. Countdown defaults are five seconds.
+8. Use **Readiness** to request/test native notifications and check observed login status.
+   Focus can suppress banners. The installed app offers a native **Start Recording** action;
+   when unavailable, use the in-app prompt. **Test Audio (3 seconds)** uses saved device settings.
 
 ## 3. Optional browser meeting detection
 
@@ -48,16 +51,17 @@
 
 1. Open Meeting Recorder and confirm it shows no recording in progress.
    Closing the red window button keeps detection running in the menu bar; use the menu-bar
-   icon's **Quit Meeting Recorder** command only when prompts are no longer wanted.
+   icon to start/stop recording or open the app. Use **Quit** in the Dock menu when prompts
+   are no longer wanted.
 2. For live speaker labels, enable **Live Speakers**. It labels the microphone as **Me** and
    remote diarization as **Remote 1**, **Remote 2**, etc. This adds up to two paid Soniox
    realtime streams.
 3. Enable **RTS Translate** only if live translation is needed; it adds another paid realtime
    stream.
 4. Join the meeting. Native Teams/Zoom/Webex/Slack Huddle or the optional browser companion
-   should show a recording prompt. Native Teams media detection is intentionally conservative,
-   so allow up to about 20 seconds. Choose **Start Recording** (or let the opted-in countdown
-   finish).
+   should show an advisory recording prompt. Native Teams media detection is conservative,
+   so allow up to about 20 seconds. Choose **Start Recording**. Qualified native call controls
+   can instead offer an automatic countdown after the supervised setup and audio test.
 5. Confirm both level meters move. If system audio does not move, stop immediately and fix
    Screen & System Audio Recording permission before continuing.
 

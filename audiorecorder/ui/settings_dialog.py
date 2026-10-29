@@ -1,6 +1,6 @@
 import sys
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -14,8 +14,11 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from audiorecorder import macos_login, secrets
@@ -24,20 +27,37 @@ from audiorecorder.meetings.browser_companion import (
     companion_available,
     companion_directory,
 )
+from audiorecorder.meetings.native_calls import PROFILES, qualification_key
+from audiorecorder.readiness import CredentialProbe, microphone_permission
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config, parent=None, browser_bridge=None, meeting_detector=None):
+    def __init__(
+        self, config, parent=None, browser_bridge=None, meeting_detector=None, lifecycle=None
+    ):
         super().__init__(parent)
         self.config = dict(config)
+        self._lifecycle = lifecycle
+        self._login_original = self.config.get("launch_at_login", False)
+        self._credential_status = "Unknown"
+        self._credential_probe = CredentialProbe(self)
+        self._credential_probe.finished.connect(self._credential_result)
         self._browser_bridge = browser_bridge
         self._meeting_detector = meeting_detector
         self.setWindowTitle("Settings")
         self.setMinimumWidth(450)
         self._build_ui()
+        if self._lifecycle is not None:
+            self._credential_probe.start()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        contents = QWidget()
+        scroll.setWidget(contents)
+        outer.addWidget(scroll)
+        layout = QVBoxLayout(contents)
 
         # --- General ---
         general_group = QGroupBox("General")
@@ -51,45 +71,121 @@ class SettingsDialog(QDialog):
         dir_row.addWidget(btn_browse)
         general_layout.addRow("Output directory:", dir_row)
 
-        self._meeting_detection = QCheckBox(
-            "Show a recording prompt when a meeting is detected")
-        self._meeting_detection.setChecked(
-            self.config.get("meeting_detection", True))
+        self._meeting_detection = QCheckBox("Show a recording prompt when a meeting is detected")
+        self._meeting_detection.setChecked(self.config.get("meeting_detection", True))
         general_layout.addRow("", self._meeting_detection)
 
-        self._calendar_detection = QCheckBox(
-            "Use macOS Calendar for scheduled meeting prompts")
-        self._calendar_detection.setChecked(
-            self.config.get("calendar_detection", False))
+        self._calendar_detection = QCheckBox("Use macOS Calendar for scheduled meeting prompts")
+        self._calendar_detection.setChecked(self.config.get("calendar_detection", False))
         self._calendar_detection.setEnabled(self._meeting_detection.isChecked())
         self._calendar_detection.setVisible(sys.platform == "darwin")
         self._meeting_detection.toggled.connect(self._calendar_detection.setEnabled)
         general_layout.addRow("", self._calendar_detection)
 
-        self._automatic_recording = QCheckBox(
-            "Auto-start app/browser calls (10-second countdown)")
-        self._automatic_recording.setChecked(
-            self.config.get("automatic_recording", False))
+        self._automatic_recording = QCheckBox("Automatically start qualified native calls")
+        self._automatic_recording.setChecked(self.config.get("automatic_recording", False))
         self._automatic_recording.setEnabled(self._meeting_detection.isChecked())
         self._meeting_detection.toggled.connect(self._automatic_recording.setEnabled)
         self._automatic_recording.setToolTip(
             "Off by default. A visible countdown always allows cancellation. "
-            "Calendar-only signals never start recording automatically.")
+            "Current window/media signals are advisory until validated. "
+            "Browser automation is deferred."
+        )
         general_layout.addRow("", self._automatic_recording)
 
-        self._launch_at_login = QCheckBox(
-            "Launch at login and keep meeting detection available")
+        self._auto_stop = QCheckBox("Automatically stop recordings started by automation")
+        self._auto_stop.setChecked(self.config.get("auto_stop_recording", False))
+        general_layout.addRow("", self._auto_stop)
+        self._start_delay = QSpinBox()
+        self._stop_delay = QSpinBox()
+        self._end_grace = QSpinBox()
+        for control, key, low, high in (
+            (self._start_delay, "auto_start_delay_seconds", 5, 120),
+            (self._stop_delay, "auto_stop_delay_seconds", 5, 120),
+            (self._end_grace, "meeting_end_grace_seconds", 15, 180),
+        ):
+            control.setRange(low, high)
+            control.setSuffix(" seconds")
+            control.setValue(self.config.get(key, 45 if key == "meeting_end_grace_seconds" else 5))
+        general_layout.addRow("Start countdown:", self._start_delay)
+        general_layout.addRow("Stop countdown:", self._stop_delay)
+        general_layout.addRow("Absence grace (advanced):", self._end_grace)
+        self._notification_style = QComboBox()
+        self._notification_style.addItem("Native macOS notifications", "native")
+        self._notification_style.addItem("In-app controls", "in-app")
+        self._notification_style.setCurrentIndex(
+            max(
+                0,
+                self._notification_style.findData(self.config.get("notification_style", "native")),
+            )
+        )
+        general_layout.addRow("Meeting prompts:", self._notification_style)
+
+        self._launch_at_login = QCheckBox("Launch at login and keep meeting detection available")
         self._launch_at_login.setVisible(sys.platform == "darwin")
         self._launch_at_login.setChecked(self.config.get("launch_at_login", False))
-        if sys.platform == "darwin":
-            try:
-                self._launch_at_login.setChecked(macos_login.login_item_registered())
-            except macos_login.LoginItemUnavailable as err:
-                self._launch_at_login.setEnabled(False)
-                self._launch_at_login.setToolTip(str(err))
+        self._login_status = QLabel()
+        self._login_status.setWordWrap(True)
+        general_layout.addRow("Login status:", self._login_status)
+        login_buttons = QHBoxLayout()
+        for title, enabled in (("Register", True), ("Disable", False)):
+            button = QPushButton(title)
+            button.clicked.connect(lambda checked=False, value=enabled: self._set_login(value))
+            button.setVisible(sys.platform == "darwin")
+            login_buttons.addWidget(button)
+        open_login = QPushButton("Open Login Items")
+        open_login.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
+            )
+        )
+        open_login.setVisible(sys.platform == "darwin")
+        login_buttons.addWidget(open_login)
+        general_layout.addRow("", login_buttons)
         general_layout.addRow("", self._launch_at_login)
 
         layout.addWidget(general_group)
+        readiness = QGroupBox("Readiness")
+        ready_layout = QVBoxLayout(readiness)
+        self._readiness = QLabel()
+        self._readiness.setWordWrap(True)
+        ready_layout.addWidget(self._readiness)
+        row = QHBoxLayout()
+        for title, callback in (
+            ("Refresh", self._refresh_readiness),
+            ("Request Notifications", self._request_notifications),
+            ("Test Notification", self._test_notification),
+            ("Test Audio (3 seconds)", self._test_audio),
+        ):
+            button = QPushButton(title)
+            button.clicked.connect(callback)
+            row.addWidget(button)
+        ready_layout.addLayout(row)
+        privacy = QPushButton("Open Audio Privacy Settings")
+        privacy.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            )
+        )
+        ready_layout.addWidget(privacy)
+        system_privacy = QPushButton("Open System Audio Privacy Settings")
+        system_privacy.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl(
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+                )
+            )
+        )
+        ready_layout.addWidget(system_privacy)
+        mic_request = QPushButton("Request Microphone Access")
+        mic_request.clicked.connect(self._request_microphone)
+        ready_layout.addWidget(mic_request)
+        layout.addWidget(readiness)
+        self._ready_timer = QTimer(self)
+        self._ready_timer.setInterval(1000)
+        self._ready_timer.timeout.connect(self._refresh_readiness)
+        self._ready_timer.start()
+        self._refresh_readiness()
 
         # --- Browser companion ---
         browser_group = QGroupBox("Browser Meeting Detection")
@@ -103,7 +199,8 @@ class SettingsDialog(QDialog):
         browser_layout.addRow("", reveal_companion)
         browser_help = QLabel(
             "In Brave, open brave://extensions, enable Developer mode, choose Load unpacked, "
-            "and select the revealed folder.")
+            "and select the revealed folder."
+        )
         browser_help.setWordWrap(True)
         browser_layout.addRow("", browser_help)
         layout.addWidget(browser_group)
@@ -119,6 +216,67 @@ class SettingsDialog(QDialog):
         native_layout.addWidget(refresh_native)
         self._refresh_native_status()
         native_group.setVisible(sys.platform == "darwin")
+        self._native_calls = QCheckBox("Inspect native Teams/Zoom call controls (Accessibility)")
+        self._native_calls.setChecked(self.config.get("native_call_detection", False))
+        native_layout.addWidget(self._native_calls)
+        native_help = QLabel(
+            "Reads call-control names only, not chat text or participants. Current matchers "
+            "need supervised validation. Permission and app-version approval are separate."
+        )
+        native_help.setWordWrap(True)
+        native_layout.addWidget(native_help)
+        access = QPushButton("Open Accessibility Settings")
+        access.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl(
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                )
+            )
+        )
+        native_layout.addWidget(access)
+        request_access = QPushButton("Request Accessibility Access")
+        request_access.clicked.connect(self._request_native_accessibility)
+        native_layout.addWidget(request_access)
+        self._native_app = QComboBox()
+        for bundle, name in PROFILES.items():
+            self._native_app.addItem(name, bundle)
+        native_layout.addWidget(self._native_app)
+        self._native_call_status = QLabel()
+        self._native_call_status.setWordWrap(True)
+        native_layout.addWidget(self._native_call_status)
+        self._test_absence = QCheckBox(
+            "Include window-absence auto-stop in supervised test (45-second grace by default)"
+        )
+        if self._lifecycle:
+            self._test_absence.setChecked(self._lifecycle.native.test_absence)
+        self._test_absence.setToolTip(
+            "Experimental: first verify that minimizing/switching Spaces preserves native "
+            "call windows. Stay present; unknown or unreadable controls never count as absence."
+        )
+        native_layout.addWidget(self._test_absence)
+        test_row = QHBoxLayout()
+        start_test = QPushButton("Start supervised automation test (30 minutes)")
+        start_test.clicked.connect(self._arm_native_test)
+        test_row.addWidget(start_test)
+        stop_test = QPushButton("End test")
+        stop_test.clicked.connect(self._end_native_test)
+        test_row.addWidget(stop_test)
+        native_layout.addLayout(test_row)
+        export = QPushButton("Export detector diagnostics…")
+        export.clicked.connect(self._export_native_diagnostics)
+        native_layout.addWidget(export)
+        self._native_checks = QCheckBox(
+            "I verified lobby, join/leave, minimize, full-screen/Spaces,\n"
+            "reconnect and mute behavior"
+        )
+        native_layout.addWidget(self._native_checks)
+        approve = QPushButton("Approve this tested app version")
+        approve.clicked.connect(self._approve_native_version)
+        native_layout.addWidget(approve)
+        revoke = QPushButton("Remove approval (apply on Save)")
+        revoke.clicked.connect(self._revoke_native_version)
+        native_layout.addWidget(revoke)
+        self._refresh_native_calls()
         layout.addWidget(native_group)
 
         # --- Audio ---
@@ -179,10 +337,9 @@ class SettingsDialog(QDialog):
 
         self._api_key_edit = QLineEdit()
         self._api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        if secrets.has_stored_key():
-            self._api_key_edit.setPlaceholderText("Stored in the system keyring")
-        else:
-            self._api_key_edit.setPlaceholderText(f"Not set, or use the {secrets.ENV_VAR} variable")
+        self._api_key_edit.setPlaceholderText(
+            f"Leave blank to keep the stored key; {secrets.ENV_VAR} overrides it"
+        )
         api_layout.addRow("API Key:", self._api_key_edit)
 
         layout.addWidget(api_group)
@@ -276,23 +433,28 @@ class SettingsDialog(QDialog):
         if stored is None:
             return
         idx = combo.findData(stored)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
+        if idx < 0:
+            combo.addItem(f"Unavailable — {stored}", stored)
+            idx = combo.count() - 1
+        combo.setCurrentIndex(idx)
 
     def _save_and_close(self):
         launch_at_login = self._launch_at_login.isChecked()
-        if sys.platform == "darwin" and self._launch_at_login.isEnabled():
-            try:
-                if launch_at_login != macos_login.login_item_registered():
-                    macos_login.set_login_item_enabled(launch_at_login)
-            except (macos_login.LoginItemUnavailable, RuntimeError) as err:
-                QMessageBox.warning(self, "Launch at login", str(err))
-                return
+        # Only an explicit change to the preference may register; a refresh or unrelated
+        # Save must never reverse external revocation.
+        if launch_at_login != self._login_original and not self._set_login(launch_at_login):
+            return
         self.config["output_dir"] = self._dir_edit.text()
         self.config["meeting_detection"] = self._meeting_detection.isChecked()
         self.config["calendar_detection"] = self._calendar_detection.isChecked()
         self.config["automatic_recording"] = self._automatic_recording.isChecked()
+        self.config["native_call_detection"] = self._native_calls.isChecked()
         self.config["launch_at_login"] = launch_at_login
+        self.config["auto_stop_recording"] = self._auto_stop.isChecked()
+        self.config["auto_start_delay_seconds"] = self._start_delay.value()
+        self.config["auto_stop_delay_seconds"] = self._stop_delay.value()
+        self.config["meeting_end_grace_seconds"] = self._end_grace.value()
+        self.config["notification_style"] = self._notification_style.currentData()
 
         lang_map = {0: "cs", 1: "en", 2: "auto"}
         self.config["language"] = lang_map.get(self._lang_combo.currentIndex(), "en")
@@ -301,7 +463,8 @@ class SettingsDialog(QDialog):
 
         target_map = {0: "en", 1: "cs"}
         self.config["translation_target"] = target_map.get(
-            self._translate_target.currentIndex(), "en")
+            self._translate_target.currentIndex(), "en"
+        )
 
         self.config["system_source_name"] = self._system_combo.currentData()
         self.config["mic_source_name"] = self._mic_combo.currentData()
@@ -317,6 +480,230 @@ class SettingsDialog(QDialog):
                 return
 
         self.accept()
+
+    def _set_login(self, enabled):
+        try:
+            macos_login.set_login_item_enabled(enabled)
+        except RuntimeError as error:
+            QMessageBox.warning(self, "Launch at login", str(error))
+            return False
+        self._launch_at_login.setChecked(enabled)
+        self._login_original = enabled
+        self.config["launch_at_login"] = enabled
+        self._refresh_readiness()
+        return True
+
+    def _refresh_readiness(self):
+        status = macos_login.login_item_status()
+        self._login_status.setText(status.state + (f" — {status.error}" if status.error else ""))
+        lines = [
+            "Window/media/browser signals are advisory. Native call controls require "
+            "Accessibility access and tested app-version approval (or supervised test mode)."
+        ]
+        if self._lifecycle:
+            native = self._lifecycle.notifications.status
+            lines.append(
+                f"Notifications: {native.authorization}; alerts: {native.alerts}; "
+                f"sound: {native.sound}. {native.error}"
+            )
+            ready, reason = self._lifecycle.window._automatic_capture_ready()
+            lines.append(f"Automatic capture ready: {ready}; {reason}")
+            lines.append(
+                f"Recording: {self._lifecycle.controller.state}; "
+                f"countdown: {self._lifecycle.controller.remaining}"
+            )
+            test = self._lifecycle.window._last_capture_test
+            if test:
+                matches = all(
+                    test["config"].get(key) == self.config.get(key)
+                    for key in ("system_source_name", "mic_source_name")
+                )
+                lines.append(
+                    f"Last capture: {test['status']}; time {test['time']:.0f}; "
+                    f"resolved system: {test['system']}; mic: {test['mic']}; "
+                    f"matches saved devices: {matches}; frames: {test.get('frames', 'unknown')}"
+                )
+            else:
+                lines.append(
+                    "System audio: not tested. OS permission does not prove received audio."
+                )
+        else:
+            lines.append("Notifications / capture: not tested in this process.")
+        lines.append("Microphone: " + self._microphone_status())
+        lines.append(f"Soniox (optional): {self._credential_status}. Recording needs no key.")
+        lines.append(
+            "Calendar: opt-in; Accessibility is used only for native call controls. "
+            "Focus may suppress banners."
+        )
+        if self._lifecycle:
+            native = self._lifecycle.native
+            lines.append(
+                f"Native call-control access: {native.permission}; "
+                f"supervised test: {native.testing}"
+            )
+        self._readiness.setText("\n".join(lines))
+        if hasattr(self, "_native_call_status"):
+            self._refresh_native_calls()
+
+    @staticmethod
+    def _microphone_status():
+        return microphone_permission()
+
+    def _refresh_native_calls(self):
+        if not self._lifecycle:
+            self._native_call_status.setText("Available in the running recorder")
+            return
+        info = self._lifecycle.native.diagnostics()
+        age = f"{info['age_seconds']:.1f}s" if info["age_seconds"] is not None else "not sampled"
+        parts = [
+            f"Accessibility: {info['permission']}; enabled: {info['enabled']}; "
+            f"probe busy: {info['busy']}; sample age: {age}"
+        ]
+        if info["testing"]:
+            parts.append(
+                f"Window-absence stopping: {'armed' if info.get('testing_absence') else 'off'}"
+            )
+            parts.append(
+                "SUPERVISED TEST: automatic start/stop temporarily enabled; "
+                "stay present and use Cancel/Keep Recording/Stop if needed. "
+                "Ending or expiring the test leaves an active recording running."
+            )
+        for app in info["apps"]:
+            parts.append(
+                f"{PROFILES[app['bundle']]} {app['version']}: {app['state']}; "
+                f"complete: {app['complete']}; controls: {', '.join(app['controls'])}; "
+                f"tracked state: {', '.join(app['tracked_states']) or 'none'}; "
+                f"approved: {app['approved']}; reason: {app['reason']}"
+                f"; closure watch: {app.get('closure_watch', 'unavailable')}; "
+                f"closed call windows: {app.get('closed_window_count', 0)}; "
+                f"empty inventory confirmed: {app.get('empty_windows_confirmed', False)}"
+            )
+        if info["error"]:
+            parts.append(info["error"])
+        self._native_call_status.setText("\n".join(parts))
+
+    def _request_native_accessibility(self):
+        if sys.platform == "darwin":
+            import ApplicationServices as AX
+
+            AX.AXIsProcessTrustedWithOptions({AX.kAXTrustedCheckOptionPrompt: True})
+            if self._lifecycle:
+                self._lifecycle.native.request()
+
+    def _arm_native_test(self):
+        if not self._lifecycle:
+            return
+        if self._lifecycle.native.permission != "granted":
+            QMessageBox.information(
+                self,
+                "Accessibility required",
+                "Enable native call inspection, save Settings, then grant "
+                "the installed recorder Accessibility access and refresh.",
+            )
+            return
+        ready, reason = self._lifecycle.window._automatic_capture_ready()
+        if not ready:
+            QMessageBox.information(self, "Test audio first", reason)
+            return
+        if not self._lifecycle.arm_native_test(
+            self._native_app.currentData(), self._test_absence.isChecked()
+        ):
+            QMessageBox.information(self, "Audio busy", "Finish the current audio operation first.")
+        self._refresh_native_calls()
+
+    def _end_native_test(self):
+        if self._lifecycle:
+            self._lifecycle.end_native_test()
+        self._refresh_native_calls()
+
+    def _export_native_diagnostics(self):
+        if not self._lifecycle:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export call-control diagnostics", "native-call-diagnostics.json", "JSON (*.json)"
+        )
+        if path:
+            try:
+                controller = self._lifecycle.controller
+                self._lifecycle.native.export_diagnostics(
+                    path,
+                    {
+                        "state": controller.state,
+                        "origin": controller.origin,
+                        "remaining": controller.remaining,
+                        "events": list(self._lifecycle.events),
+                    },
+                )
+            except OSError as error:
+                QMessageBox.warning(self, "Could not export diagnostics", str(error))
+
+    def _approve_native_version(self):
+        if not self._lifecycle:
+            return
+        native = self._lifecycle.native
+        bundle = self._native_app.currentData()
+        if not self._native_checks.isChecked() or not native.can_approve(bundle):
+            QMessageBox.information(
+                self,
+                "Complete supervised checks first",
+                "Approval requires observed joined and confirmed ended states in this session "
+                "plus the full real-call checklist. Unknown/hidden alone does not prove an end.",
+            )
+            return
+        stored = dict(self.config.get("native_call_qualifications", {}))
+        stored[bundle] = qualification_key(bundle, native.versions[bundle])
+        self.config["native_call_qualifications"] = stored
+        absence = dict(self.config.get("native_call_absence_qualifications", {}))
+        if self._test_absence.isChecked() and "absence-stop" in native.transitions[bundle]:
+            absence[bundle] = qualification_key(bundle, native.versions[bundle])
+        else:
+            absence.pop(bundle, None)
+        self.config["native_call_absence_qualifications"] = absence
+        QMessageBox.information(
+            self,
+            "Approval prepared",
+            "Save Settings to apply approval for this app version. "
+            "App or matcher updates require testing again.",
+        )
+
+    def _revoke_native_version(self):
+        stored = dict(self.config.get("native_call_qualifications", {}))
+        stored.pop(self._native_app.currentData(), None)
+        self.config["native_call_qualifications"] = stored
+        absence = dict(self.config.get("native_call_absence_qualifications", {}))
+        absence.pop(self._native_app.currentData(), None)
+        self.config["native_call_absence_qualifications"] = absence
+
+    def _credential_result(self, status):
+        self._credential_status = status
+        self._refresh_readiness()
+
+    def _request_microphone(self):
+        if sys.platform == "darwin":
+            import AVFoundation
+
+            AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+                AVFoundation.AVMediaTypeAudio, lambda granted: None
+            )
+
+    def _request_notifications(self):
+        if self._lifecycle:
+            self._lifecycle.notifications.request()
+
+    def _test_notification(self):
+        if self._lifecycle:
+            self._lifecycle.notify("error", "Meeting Recorder notification test")
+
+    def _test_audio(self):
+        if self._lifecycle:
+            self._lifecycle.window._test_audio()
+
+    def event(self, event):
+        if event.type() == QEvent.Type.WindowActivate and hasattr(self, "_readiness"):
+            self._refresh_readiness()
+            if self._lifecycle:
+                self._lifecycle.notifications.refresh()
+        return super().event(event)
 
     def get_config(self):
         return self.config

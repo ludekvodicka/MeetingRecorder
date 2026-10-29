@@ -169,13 +169,32 @@ class NullMeetingDetector:
 class CombinedMeetingDetector:
     def __init__(self, detectors):
         self._detectors = tuple(detectors)
+        self.errors = {}
 
     def scan(self):
         combined = {}
+        self.errors = {}
         for detector in self._detectors:
-            for candidate in detector.scan():
-                combined[candidate.key] = candidate
+            try:
+                for candidate in detector.scan():
+                    combined[candidate.key] = candidate
+            except Exception as error:
+                self.errors[type(detector).__name__] = str(error)
         return list(combined.values())
+
+
+    def add_detector(self, detector):
+        self._detectors += (detector,)
+
+    def observations(self):
+        observations = []
+        for detector in self._detectors:
+            if hasattr(detector, 'observations'):
+                try:
+                    observations.extend(detector.observations())
+                except Exception as error:
+                    self.errors[type(detector).__name__] = str(error)
+        return tuple(observations)
 
 
 class TeamsMediaDetector:
@@ -266,6 +285,8 @@ class MacOSMeetingDetector:
                 | Quartz.kCGWindowListExcludeDesktopElements,
                 Quartz.kCGNullWindowID,
             )
+            if raw is None:
+                raise RuntimeError("Window scan returned no result; coverage is unknown")
             windows = [
                 {
                     "owner": item.get(Quartz.kCGWindowOwnerName, ""),

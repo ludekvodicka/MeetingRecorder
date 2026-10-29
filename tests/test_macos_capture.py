@@ -298,7 +298,7 @@ def test_partial_start_cleanup_removes_temporary_audio_files(tmp_path):
     assert backend._mic_path is None
 
 
-def test_stop_finalizes_paths_even_when_native_stream_cleanup_fails():
+def test_stop_retains_ownership_when_native_stream_cleanup_fails():
     class BrokenStream:
         def stop(self):
             raise RuntimeError("stop failed")
@@ -312,8 +312,10 @@ def test_stop_finalizes_paths_even_when_native_stream_cleanup_fails():
     backend._system_path = "system.wav"
     backend._mic_path = "mic.wav"
 
-    assert backend.stop() == ("system.wav", "mic.wav")
-    assert backend._system_stream is None
+    with pytest.raises(RuntimeError, match="acknowledge stop"):
+        backend.stop()
+    assert backend._system_stream is not None
+    assert backend._is_recording
 
 
 def test_start_builds_and_starts_screen_capturekit(monkeypatch):

@@ -160,13 +160,15 @@ def package_macos():
 
 
 def prepare_macos_dmg_root(app, target):
-    """Stage the app, browser companion, quick start, and Applications shortcut."""
+    """Stage the app, companion, workflow guides and Applications shortcut."""
     if target.exists():
         shutil.rmtree(target)
     target.mkdir(parents=True)
     shutil.copytree(app, target / app.name, symlinks=True)
     shutil.copytree(BROWSER_EXTENSION, target / "Meeting Recorder Browser Extension")
     shutil.copy2(QUICK_START, target / "READ ME - Next Meeting.md")
+    for name in ("native-call-test-checklist.md", "native-lifecycle.md"):
+        shutil.copy2(ROOT / "docs" / name, target / name)
     (target / "Applications").symlink_to("/Applications", target_is_directory=True)
 
 

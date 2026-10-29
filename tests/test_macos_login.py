@@ -31,9 +31,10 @@ def test_enabled_status_is_read_from_service(monkeypatch):
     assert macos_login.login_item_registered()
 
 
-def test_pending_approval_is_still_registered(monkeypatch):
+def test_pending_approval_is_not_enabled(monkeypatch):
     monkeypatch.setattr(macos_login, "_service", lambda platform_name=None: Service(status=2))
-    assert macos_login.login_item_registered()
+    assert not macos_login.login_item_registered()
+    assert macos_login.login_item_status().state == "requires approval"
 
 
 def test_registration_and_unregistration_use_the_main_app_service(monkeypatch):

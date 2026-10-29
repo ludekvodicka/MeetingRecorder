@@ -51,11 +51,17 @@ class CaptureError(RuntimeError):
     """Recording could not start. The message is shown to the user as it is."""
 
 
+class CaptureUnresolved(CaptureError):
+    """Native resource ownership is unresolved; do not start another capture."""
+
+
 class CaptureBackend(ABC):
     def __init__(self):
         self._system_level_callback = None
         self._mic_level_callback = None
         self._error_callback = None
+        self.frame_counts = {"system": 0, "mic": 0}
+        self._write_failure_reported = False
         self._mic_muted = False
         self._is_recording = False
         self._active_system_source = None
@@ -89,6 +95,23 @@ class CaptureBackend(ABC):
     @abstractmethod
     def close(self):
         """Release the audio library. The instance is unusable afterwards."""
+
+    def resolve_sources(self, system_source, mic_source):
+        """Resolve names without opening audio streams for unattended-start verification."""
+        raise CaptureError("This backend does not support unattended source verification")
+
+    def _write_samples(self, source, data):
+        """Shared writer mechanics; callbacks never wait on UI or network work."""
+        try:
+            with self._lock:
+                writer = getattr(self, f"_{source}_writer")
+                if writer is not None and not writer.closed:
+                    writer.write(data)
+                    self.frame_counts[source] += len(data)
+        except Exception:
+            if not self._write_failure_reported:
+                self._write_failure_reported = True
+                self._report_error(f"Could not write {source} audio; source files retained")
 
     def set_level_callbacks(self, system_callback, mic_callback):
         self._system_level_callback = system_callback
@@ -181,7 +204,7 @@ class CaptureBackend(ABC):
 
 def rms_level(data):
     """Level for the meters, 0 to 1. Shared so both backends drive the bars identically."""
-    rms = float(np.sqrt(np.mean(data ** 2)))
+    rms = float(np.sqrt(np.mean(data**2)))
     return min(1.0, rms * 10)
 
 

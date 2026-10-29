@@ -1,3 +1,5 @@
+import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +11,7 @@ import av
 # delete's idea left the summary behind.
 SIDECAR_SUFFIXES = (
     ".md", ".summary.md", ".live.md", ".speakers.md", ".speakers.json",
+    ".transcription.json",
 )
 
 
@@ -31,6 +34,7 @@ class Recording:
     duration_seconds: float
     is_transcribed: bool
     transcript_path: str
+    transcription_status: str = ""
 
 
 class RecordingManager:
@@ -48,6 +52,17 @@ class RecordingManager:
             date = datetime.fromtimestamp(f.stat().st_mtime)
             duration = self._get_duration(str(f))
             transcript = f.with_suffix(".md")
+            status = ""
+            checkpoint = f.with_suffix(".transcription.json")
+            if checkpoint.exists() and not transcript.exists():
+                try:
+                    stage = json.loads(checkpoint.read_text(encoding="utf-8")).get("stage", "")
+                    status = (
+                        "Request status unknown — review before retrying"
+                        if stage.startswith("submitting_") else "Saved job — click Resume"
+                    )
+                except (OSError, ValueError, AttributeError):
+                    status = "Job state unreadable — review before retrying"
             recordings.append(Recording(
                 path=str(f),
                 name=name,
@@ -55,6 +70,7 @@ class RecordingManager:
                 duration_seconds=duration,
                 is_transcribed=transcript.exists(),
                 transcript_path=str(transcript) if transcript.exists() else "",
+                transcription_status=status,
             ))
         return recordings
 
@@ -70,7 +86,7 @@ class RecordingManager:
 
     def generate_filename(self):
         ts = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        return f"Recording {ts}.m4a"
+        return f"Recording {ts} {uuid.uuid4().hex[:8]}.m4a"
 
     def delete(self, recording_path):
         p = Path(recording_path)

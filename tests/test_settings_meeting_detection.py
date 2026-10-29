@@ -28,15 +28,17 @@ def dialog(app, monkeypatch, tmp_path):
     monkeypatch.setattr(settings_module.secrets, "has_stored_key", lambda: False)
     monkeypatch.setattr(settings_module.sys, "platform", "darwin")
     monkeypatch.setattr(settings_module.macos_login, "login_item_registered", lambda: False)
-    built = SettingsDialog({
-        "output_dir": str(tmp_path),
-        "meeting_detection": False,
-        "calendar_detection": False,
-        "automatic_recording": False,
-        "launch_at_login": False,
-        "language": "en",
-        "translation_target": "en",
-    })
+    built = SettingsDialog(
+        {
+            "output_dir": str(tmp_path),
+            "meeting_detection": False,
+            "calendar_detection": False,
+            "automatic_recording": False,
+            "launch_at_login": False,
+            "language": "en",
+            "translation_target": "en",
+        }
+    )
     yield built
     built.deleteLater()
 
@@ -92,3 +94,33 @@ def test_native_diagnostics_explain_the_last_scan(app, monkeypatch, tmp_path):
     assert "Visible supported apps: Microsoft Teams" in built._native_status.text()
     assert "Teams media monitor: idle" in built._native_status.text()
     built.deleteLater()
+
+
+def test_unrelated_save_does_not_reregister_revoked_login_item(dialog, monkeypatch):
+    applied = []
+    dialog._login_original = True
+    dialog._launch_at_login.setChecked(True)
+    monkeypatch.setattr(
+        settings_module.macos_login,
+        "login_item_status",
+        lambda: settings_module.macos_login.LoginStatus("requires approval"),
+    )
+    monkeypatch.setattr(settings_module.macos_login, "set_login_item_enabled", applied.append)
+    dialog._refresh_readiness()
+    dialog._save_and_close()
+    assert applied == []
+    assert dialog.get_config()["launch_at_login"]
+
+
+def test_missing_saved_device_is_not_silently_replaced(dialog):
+    dialog._select_stored(dialog._mic_combo, "Disconnected microphone")
+    dialog._save_and_close()
+    assert dialog.get_config()["mic_source_name"] == "Disconnected microphone"
+
+
+def test_independent_countdown_settings_are_saved(dialog):
+    dialog._start_delay.setValue(7)
+    dialog._stop_delay.setValue(19)
+    dialog._save_and_close()
+    assert dialog.get_config()["auto_start_delay_seconds"] == 7
+    assert dialog.get_config()["auto_stop_delay_seconds"] == 19

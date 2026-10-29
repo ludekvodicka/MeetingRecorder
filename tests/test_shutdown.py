@@ -62,7 +62,7 @@ def test_red_close_hides_into_the_menu_bar_without_stopping_services():
 
     assert window.hidden
     assert event.ignored
-    assert window._tray_icon.messages
+    assert window._tray_icon is not None
 
 
 def test_close_waits_for_an_active_encoder():
@@ -74,7 +74,7 @@ def test_close_waits_for_an_active_encoder():
 
     assert event.ignored
     assert not event.accepted
-    assert not window._quitting
+    assert window._quitting
     assert "Finishing background work" in window._status_bar.messages[0][0]
 
 
@@ -87,4 +87,17 @@ def test_close_waits_for_transcription_or_cleanup():
 
     assert event.ignored
     assert not event.accepted
-    assert not window._quitting
+    assert window._quitting
+
+
+def test_close_waits_for_thread_completion_after_result_clears_busy_path():
+    from types import SimpleNamespace
+
+    window = closing_stub()
+    window._quitting = True
+    window._processing = SimpleNamespace(is_running=lambda: True)
+    window._background_threads_running = lambda: MainWindow._background_threads_running(window)
+    event = FakeEvent()
+    MainWindow.closeEvent(window, event)
+    assert event.ignored
+    assert not event.accepted

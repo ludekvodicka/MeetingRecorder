@@ -15,6 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from audiorecorder.audio.session import CaptureSession  # noqa: E402
 from audiorecorder.meetings.detection import (  # noqa: E402
     MeetingCandidate,
     MeetingPromptPolicy,
@@ -30,6 +31,15 @@ class FakeCapture:
         self.started = False
         self.stopped = False
         self.error_callback = None
+
+    def resolve_sources(self, system_source, mic_source):
+        return self.active_system_source, self.active_mic_source
+
+    def list_microphones(self):
+        return []
+
+    def list_system_sources(self):
+        return []
 
     def set_level_callbacks(self, system, mic):
         pass
@@ -140,7 +150,20 @@ def window(app, tmp_path, monkeypatch):
         captures.append(FakeCapture())
         return captures[-1]
 
-    monkeypatch.setattr(mw, "create_backend", make_capture)
+    class InlineExecutor:
+        def submit(self, function, *args):
+            function(*args)
+
+        def shutdown(self, **kwargs):
+            pass
+
+    def session():
+        built = CaptureSession(make_capture)
+        built.executor.shutdown()
+        built.executor = InlineExecutor()
+        return built
+
+    monkeypatch.setattr(mw, "CaptureSession", session)
     monkeypatch.setattr(mw, "SubtitleEngine", FakeEngine)
     # Never the real one: it writes the user's live configuration file.
     monkeypatch.setattr(mw, "save_config", lambda config: None)
@@ -151,15 +174,17 @@ def window(app, tmp_path, monkeypatch):
     built = []
 
     def build(rts_translate, live_speakers=False, automatic_recording=False):
-        w = MainWindow({
-            "output_dir": str(tmp_path),
-            "rts_translate": rts_translate,
-            "live_speakers": live_speakers,
-            "meeting_detection": False,
-            "automatic_recording": automatic_recording,
-            "language": "en",
-            "translation_target": "cs",
-        })
+        w = MainWindow(
+            {
+                "output_dir": str(tmp_path),
+                "rts_translate": rts_translate,
+                "live_speakers": live_speakers,
+                "meeting_detection": False,
+                "automatic_recording": automatic_recording,
+                "language": "en",
+                "translation_target": "cs",
+            }
+        )
         w.captures = captures
         built.append(w)
         return w
@@ -173,9 +198,12 @@ def window(app, tmp_path, monkeypatch):
     for w in built:
         # Cleared first: closing while it is set asks the user whether to stop the
         # recording, and nobody is here to answer.
-        w._is_recording = False
+        w._stop_recording()
         w._overlay.close()
+        w._quitting = True
         w.close()
+        app.removeEventFilter(w._hotkey_filter)
+        w._lifecycle.timer.stop()
         w.deleteLater()
     app.processEvents()
 
@@ -219,8 +247,7 @@ class TestNothingIsPaidForWhileOff:
 
         assert w.captures[0].stopped
         assert not w._is_recording
-        assert warnings[0][0] == "Recording Stopped"
-        assert "partial recording is being saved" in warnings[0][1]
+        assert "Capture failed" in w._status_bar.currentMessage()
 
 
 class TestSwitchingOffMidRecording:
@@ -286,19 +313,23 @@ class TestLiveSpeakerToggle:
         w._start_recording()
         assert len(FakeEngine.instances) == 2
         assert {engine.kwargs.get("speaker_label") for engine in FakeEngine.instances} == {
-            None, "Me"}
+            None,
+            "Me",
+        }
         assert w.captures[0].tap is not None
         assert w.captures[0].mic_tap is not None
 
     def test_remote_session_uses_diarization(self, window):
         w = window(rts_translate=False, live_speakers=True)
         w._start_recording()
-        remote = next(engine for engine in FakeEngine.instances
-                      if engine.kwargs.get("speaker_prefix") == "Remote")
+        remote = next(
+            engine
+            for engine in FakeEngine.instances
+            if engine.kwargs.get("speaker_prefix") == "Remote"
+        )
         assert remote.kwargs["enable_speaker_diarization"] is True
 
-    def test_microphone_only_recording_opens_only_the_me_session(
-            self, window, monkeypatch):
+    def test_microphone_only_recording_opens_only_the_me_session(self, window, monkeypatch):
         monkeypatch.setattr(FakeCapture, "active_system_source", None)
         w = window(rts_translate=False, live_speakers=True)
         w._start_recording()
@@ -321,10 +352,14 @@ class TestLiveSpeakerToggle:
         w._start_recording()
         w.captures[0].tap(b"audio")
         assert len(FakeEngine.instances) == 3
-        translation = next(engine for engine in FakeEngine.instances
-                           if engine.kwargs.get("translate_to") == "cs")
-        remote = next(engine for engine in FakeEngine.instances
-                      if engine.kwargs.get("speaker_prefix") == "Remote")
+        translation = next(
+            engine for engine in FakeEngine.instances if engine.kwargs.get("translate_to") == "cs"
+        )
+        remote = next(
+            engine
+            for engine in FakeEngine.instances
+            if engine.kwargs.get("speaker_prefix") == "Remote"
+        )
         assert translation.received == [b"audio"]
         assert remote.received == [b"audio"]
 
@@ -364,6 +399,12 @@ class TestLiveSpeakerToggle:
             "speakers": w._speaker_sidecar_payload(),
         }
         assert not (tmp_path / "call.speakers.md").exists()
+        from types import SimpleNamespace
+
+        w._encoding_ids[recording] = (
+            "old",
+            SimpleNamespace(result=SimpleNamespace(cleanup_errors=())),
+        )
         w._on_encode_finished(recording)
         assert (tmp_path / "call.speakers.md").exists()
 
@@ -378,6 +419,9 @@ class TestMeetingPopupIntegration:
         def scan(self):
             return [self.candidate]
 
+        def observations(self):
+            return ()
+
     def test_a_stable_signal_shows_the_recording_prompt(self, window):
         w = window(rts_translate=False)
         w._meeting_detector = self.Detector(self.candidate)
@@ -388,8 +432,7 @@ class TestMeetingPopupIntegration:
         assert w._meeting_prompt is not None
         w._meeting_prompt.reject()
 
-    def test_macos_prompt_is_not_tied_to_the_main_window_space(
-            self, window, monkeypatch):
+    def test_macos_prompt_is_not_tied_to_the_main_window_space(self, window, monkeypatch):
         w = window(rts_translate=False)
         w._meeting_detector = self.Detector(self.candidate)
         w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
@@ -400,8 +443,7 @@ class TestMeetingPopupIntegration:
         assert w._meeting_prompt.parent() is None
         w._meeting_prompt.reject()
 
-    def test_other_platforms_keep_the_existing_prompt_ownership(
-            self, window, monkeypatch):
+    def test_other_platforms_keep_the_existing_prompt_ownership(self, window, monkeypatch):
         w = window(rts_translate=False)
         w._meeting_detector = self.Detector(self.candidate)
         w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
@@ -429,20 +471,17 @@ class TestMeetingPopupIntegration:
         w._poll_for_meeting()
         assert w._meeting_prompt is None
 
-    def test_opt_in_uses_a_cancelable_countdown_for_native_calls(self, window):
+    def test_unqualified_native_signal_remains_manual_even_with_opt_in(self, window):
         w = window(rts_translate=False, automatic_recording=True)
         w._meeting_detector = self.Detector(self.candidate)
         w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
         w._poll_for_meeting()
-        prompt = w._meeting_prompt
-        assert prompt.is_automatic
-        for _ in range(mw.AUTO_START_SECONDS):
-            prompt._tick()
-        assert w._is_recording
+        assert not w._meeting_prompt.is_automatic
+        assert not w._is_recording
+        w._meeting_prompt.reject()
 
     def test_calendar_signal_never_automatically_starts_recording(self, window):
-        calendar = MeetingCandidate(
-            "calendar:1", "Calendar", "Project sync", source="calendar")
+        calendar = MeetingCandidate("calendar:1", "Calendar", "Project sync", source="calendar")
         w = window(rts_translate=False, automatic_recording=True)
         w._meeting_detector = self.Detector(calendar)
         w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
@@ -470,13 +509,11 @@ class TestMeetingPopupIntegration:
         w._meeting_prompt_policy = MeetingPromptPolicy(observations_required=1)
         w._poll_for_meeting()
         prompt = w._meeting_prompt
-        for _ in range(mw.AUTO_START_SECONDS - 1):
-            prompt._tick()
         detector.scan = lambda: []
-        prompt._tick()
+        prompt.accept()
         assert not w._is_recording
 
-    def test_start_now_is_an_explicit_override_of_the_detector(self, window):
+    def test_start_now_requires_fresh_evidence(self, window):
         detector = self.Detector(self.candidate)
         w = window(rts_translate=False, automatic_recording=True)
         w._meeting_detector = detector
@@ -484,7 +521,7 @@ class TestMeetingPopupIntegration:
         w._poll_for_meeting()
         detector.scan = lambda: []
         w._meeting_prompt.accept()
-        assert w._is_recording
+        assert not w._is_recording
 
 
 class TestTheButtonShowsItIsOn:
@@ -519,3 +556,118 @@ class TestTheButtonShowsItIsOn:
         w._start_dictation()
 
         assert w._btn_dictation.styleSheet() == ACTIVE_TOGGLE_STYLE
+
+
+def test_error_from_previous_capture_cannot_stop_next_recording(window):
+    w = window(rts_translate=False)
+    w._start_recording()
+    old_callback = w.captures[-1].error_callback
+    w._stop_recording()
+    w._start_recording()
+    current = w.captures[-1]
+    old_callback("late error from previous capture")
+    assert w._is_recording and current.started and not current.stopped
+
+
+@pytest.mark.parametrize("absence", [False, True, "empty", "closed"])
+def test_native_detector_drives_complete_automatic_workflow_without_real_audio(window, absence):
+    from types import SimpleNamespace
+
+    from audiorecorder.meetings.detection import CombinedMeetingDetector
+
+    w = window(rts_translate=False)
+    adapter = w._lifecycle
+    adapter.timer.stop()
+    w._automatic_capture_ready = lambda: (True, "Synthetic audio fixture")
+    w._last_capture_test = {"system": "Speakers", "mic": "Microphone"}
+    native = adapter.native
+    clock = SimpleNamespace(value=100.0)
+    adapter.controller.clock = lambda: clock.value
+    native.clock = lambda: clock.value
+    native.enabled = True
+    native.test_bundle = "com.microsoft.teams2"
+    native.test_until = 1000
+    native.test_absence = bool(absence)
+    w._meeting_detector = CombinedMeetingDetector([native])
+
+    def observed(controls, at, identifier="call"):
+        clock.value = at
+        native._accept(
+            {
+                "permission": "granted",
+                "apps": [
+                    {
+                        "bundle": native.test_bundle,
+                        "version": "test-1",
+                        "process": "999:100",
+                        "running": True,
+                        "complete": True,
+                        "empty_windows_confirmed": identifier is None and absence == "empty",
+                        "windows": []
+                        if identifier is None
+                        else [{"controls": controls, "identifier": identifier, "complete": True}],
+                    }
+                ],
+            },
+            at,
+            0,
+        )
+
+    # Prejoin can persist indefinitely without capture, even with mic/camera controls.
+    observed(["join", "microphone", "camera"], 100)
+    observed(["join", "microphone", "camera"], 102)
+    assert not w._is_recording
+    observed(["hangup", "microphone", "camera"], 104)
+    observed(["hangup", "microphone", "camera"], 106)
+    assert adapter.controller.state == "start-pending"
+    assert adapter.controller.deadline == 111
+    observed(["hangup", "microphone", "camera"], 110)
+    assert not w._is_recording
+    observed(["hangup", "microphone", "camera"], 111)
+    assert w._is_recording and adapter.controller.origin == "automatic"
+    observed([], 113)  # Hidden controls: preserve capture.
+    assert w._is_recording
+    observed(["hangup", "microphone", "camera"], 115)
+    if absence:
+        remaining = None if absence in ("empty", "closed") else "main"
+        if absence == "closed":
+            native.request = lambda: None
+            native._closed(native.test_bundle, "999:100", "call", native.generation)
+        observed([], 117, remaining)
+        for at in range(119, 162, 2):
+            observed([], at, remaining)
+            assert w._is_recording
+        observed([], 162, remaining)
+        assert adapter.controller.state == "stop-pending"
+        assert adapter.controller.deadline == 167
+        observed([], 167, remaining)
+        assert "absence-stop" in native.transitions["com.microsoft.teams2"]
+    else:
+        observed(["rejoin"], 117)
+        assert adapter.controller.state == "recording"
+        observed(["rejoin"], 119)
+        assert adapter.controller.state == "stop-pending"
+        assert adapter.controller.deadline == 124
+        observed(["rejoin"], 124)
+    assert not w._is_recording
+    assert w.captures[-1].stopped
+    assert adapter.controller.state == "idle"
+    native.enabled = False
+    native.test_bundle = ""
+
+
+def test_reopened_settings_preserves_live_absence_test_mode(window, monkeypatch):
+    from audiorecorder.ui import settings_dialog as settings
+
+    w = window(rts_translate=False)
+    native = w._lifecycle.native
+    native.test_bundle = "com.microsoft.teams2"
+    native.test_until = native.clock() + 100
+    native.test_absence = True
+    monkeypatch.setattr(settings, "create_backend", FakeCapture)
+    monkeypatch.setattr(settings.CredentialProbe, "start", lambda self: None)
+    dialog = settings.SettingsDialog(w.config, lifecycle=w._lifecycle)
+    assert dialog._test_absence.isChecked()
+    assert "Window-absence stopping: armed" in dialog._native_call_status.text()
+    dialog.deleteLater()
+    native.test_until = 0

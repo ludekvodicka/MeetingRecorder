@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
@@ -49,12 +49,29 @@ def _runtime_smoke_test(platform_name=None):
         raise RuntimeError("bundled application assets are missing")
 
     if platform_name == "darwin":
+        import ApplicationServices
         import CoreAudio  # noqa: F401
+        import CoreFoundation
         import CoreMedia  # noqa: F401
         import EventKit  # noqa: F401
         import Quartz  # noqa: F401
         import ScreenCaptureKit  # noqa: F401
         import ServiceManagement  # noqa: F401
+        import UserNotifications  # noqa: F401
+
+        from audiorecorder.macos_notifications import _delegate_class
+        from audiorecorder.meetings.window_closure import observer_callback
+
+        _delegate_class()
+
+        callback = observer_callback(ApplicationServices, lambda *args: None)
+        error, observer = ApplicationServices.AXObserverCreate(os.getpid(), callback, None)
+        if error:
+            raise RuntimeError("native call-window observer unavailable")
+        source = ApplicationServices.AXObserverGetRunLoopSource(observer)
+        loop = CoreFoundation.CFRunLoopGetCurrent()
+        CoreFoundation.CFRunLoopAddSource(loop, source, CoreFoundation.kCFRunLoopDefaultMode)
+        CoreFoundation.CFRunLoopRemoveSource(loop, source, CoreFoundation.kCFRunLoopDefaultMode)
 
         from audiorecorder.audio.macos_screen_capture import _make_serial_queue
 
@@ -69,14 +86,29 @@ def _runtime_smoke_test(platform_name=None):
 
 def main():
     _configure_logging()
+    if "--native-call-snapshot" in sys.argv:
+        from audiorecorder.meetings.macos_call_probe import write_snapshot
+
+        index = sys.argv.index("--native-call-snapshot")
+        if len(sys.argv) != index + 2:
+            raise SystemExit(2)
+        write_snapshot(sys.argv[index + 1])
+        return
+    if "--credential-status" in sys.argv:
+        from audiorecorder.readiness import STATUS_CODES, credential_status
+
+        raise SystemExit(STATUS_CODES[credential_status()])
     if "--smoke-test" in sys.argv:
         _runtime_smoke_test()
         return
-    cfg = load_config()
+    if "--notification-smoke" in sys.argv:
+        _notification_smoke()
+        return
+    from audiorecorder.macos_launch import LaunchContext
+    from audiorecorder.macos_notifications import Notifications
 
-    os.makedirs(cfg["output_dir"], exist_ok=True)
-    save_config(cfg)
-
+    launch = LaunchContext()
+    notifications = Notifications()
     app = QApplication(sys.argv)
     app.setApplicationName("Meeting Recorder")
     if sys.platform == "darwin":
@@ -91,11 +123,66 @@ def main():
     if not instance.take_ownership():
         return
 
-    window = MainWindow(cfg)
+    cfg = load_config()
+    os.makedirs(cfg["output_dir"], exist_ok=True)
+    save_config(cfg)
+    window = MainWindow(cfg, notifications)
+    quit_filter = QuitFilter(window)
+    app.installEventFilter(quit_filter)
+    app.aboutToQuit.connect(instance.close)
     instance.another_instance_started.connect(lambda: _raise(window))
-    _raise(window)
 
+    def show_launch():
+        if not launch.login:
+            _raise(window)
+
+    launch.on_finish = show_launch
+    if launch.finished:
+        QTimer.singleShot(0, show_launch)
     sys.exit(app.exec())
+
+
+def _notification_smoke():
+    """Exercise bundle identity, native settings and real selectors without prompting."""
+    import json
+
+    from audiorecorder.macos_notifications import Notifications
+
+    notifications = Notifications()
+    application = QApplication(sys.argv)
+    result = {}
+
+    def observed(status):
+        result.update(
+            authorization=status.authorization,
+            alerts=status.alerts,
+            error=status.error,
+            delegate=notifications.delegate is not None,
+        )
+        application.quit()
+
+    notifications.status_changed.connect(observed)
+    QTimer.singleShot(0, notifications.refresh)
+    QTimer.singleShot(5000, application.quit)
+    application.exec()
+    notifications.close()
+    if not result or not result.get("delegate") or result.get("error"):
+        raise RuntimeError(f"Native notification smoke failed: {result}")
+    index = sys.argv.index("--notification-smoke")
+    if len(sys.argv) > index + 1:
+        Path(sys.argv[index + 1]).write_text(json.dumps(result))
+
+
+class QuitFilter(QObject):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Quit and not getattr(self.window, "_exit_ready", False):
+            self.window._quit_from_tray()
+            return True
+        return False
 
 
 def _raise(window):

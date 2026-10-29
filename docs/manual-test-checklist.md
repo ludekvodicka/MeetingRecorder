@@ -105,8 +105,16 @@ and say in the release notes what was not exercised.
 - [ ] Enable automatic recording, open a detected app/browser meeting, and cancel the visible
       10-second countdown; repeat and let it finish; confirm Calendar alone never counts down
 - [ ] Begin a countdown and close the meeting before zero: no recording starts
+- [ ] Click the menu-bar icon with the main window open, minimized and closed: the menu shows
+      Start Recording, Stop Recording and Open Meeting Recorder without raising the window
+- [ ] Start and stop recording from that menu: the enabled actions follow the recording state,
+      rapid repeated clicks do not duplicate operations, and the saved audio plays back
+- [ ] During an automatic start countdown, use Start Recording: capture starts once; Stop
+      Recording also works during an automatic stop countdown
+- [ ] While dictation is active or capture shutdown is unresolved, Start Recording is disabled;
+      Open Meeting Recorder provides access to the controls and any capture recovery
 - [ ] Close the macOS main window: it hides, the menu-bar icon remains, and a meeting still
-      prompts; choose Quit from the icon and confirm the process and localhost bridge stop
+      prompts; choose Quit from the Dock menu and confirm the process and localhost bridge stop
 - [ ] Enable Launch at login, log out/in, and confirm the app launches and detects a meeting;
       disable it and confirm macOS no longer launches it
 - [ ] Dictation asks for Accessibility permission, and works once it is granted

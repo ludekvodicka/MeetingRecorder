@@ -12,6 +12,8 @@ import threading
 
 import numpy as np
 
+from audiorecorder.audio.backend import CaptureUnresolved
+
 log = logging.getLogger(__name__)
 
 CAPTURE_RATE = 48000
@@ -38,7 +40,7 @@ def _await_result(invoke, operation):
 
     invoke(completion)
     if not finished.wait(_OPERATION_TIMEOUT):
-        raise RuntimeError(f"Timed out while waiting for ScreenCaptureKit to {operation}")
+        raise CaptureUnresolved(f"Timed out while waiting for ScreenCaptureKit to {operation}")
     if result.get("error") is not None:
         message = _error_text(result["error"])
         raise RuntimeError(f"ScreenCaptureKit could not {operation}: {message}")
@@ -55,7 +57,7 @@ def _await_action(invoke, operation):
 
     invoke(completion)
     if not finished.wait(_OPERATION_TIMEOUT):
-        raise RuntimeError(f"Timed out while waiting for ScreenCaptureKit to {operation}")
+        raise CaptureUnresolved(f"Timed out while waiting for ScreenCaptureKit to {operation}")
     if result.get("error") is not None:
         message = _error_text(result["error"])
         raise RuntimeError(f"ScreenCaptureKit could not {operation}: {message}")
@@ -179,6 +181,10 @@ def _stream_output_class():
                     owner._callback(data)
             except Exception:
                 log.exception("could not process a ScreenCaptureKit audio block")
+                if not getattr(owner, "_sample_error_reported", False):
+                    owner._sample_error_reported = True
+                    if owner._error_callback is not None:
+                        owner._error_callback("System audio samples could not be written")
 
         def stream_didStopWithError_(self, stream, error):
             self._owner._did_stop_with_error(error)
@@ -267,6 +273,8 @@ class ScreenCaptureAudioStream:
                 self._stream.startCaptureWithCompletionHandler_,
                 "start system-audio capture",
             )
+        except CaptureUnresolved:
+            raise
         except Exception:
             self._running = False
             raise
@@ -274,11 +282,11 @@ class ScreenCaptureAudioStream:
     def stop(self):
         if self._stream is None or not self._running:
             return
-        self._running = False
         _await_action(
             self._stream.stopCaptureWithCompletionHandler_,
             "stop system-audio capture",
         )
+        self._running = False
 
     def close(self):
         if self._running:
