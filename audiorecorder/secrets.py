@@ -7,6 +7,8 @@ value, which is what development and headless machines use.
 """
 
 import os
+import subprocess
+import sys
 
 import keyring
 from keyring.errors import KeyringError
@@ -25,6 +27,42 @@ _NO_BACKEND_HINT = (
 
 class SecretsError(RuntimeError):
     """Raised when a key cannot be stored or removed."""
+
+
+def get_api_key_headless(timeout=10):
+    """Read credentials without allowing a Keychain prompt or unbounded wait.
+
+    Isolate native keyring calls so a blocked backend can be terminated. Secrets
+    travel only over the private child pipe, never command arguments or logs.
+    """
+    from_env = os.environ.get(ENV_VAR, "").strip()
+    if from_env:
+        return from_env
+    script = """
+import ctypes
+import sys
+if sys.platform == 'darwin':
+    security = ctypes.CDLL('/System/Library/Frameworks/Security.framework/Security')
+    disable = security.SecKeychainSetUserInteractionAllowed
+    disable.argtypes = [ctypes.c_ubyte]
+    disable.restype = ctypes.c_int32
+    if disable(False) != 0:
+        sys.exit(2)
+from audiorecorder.secrets import get_api_key
+sys.stdout.write(get_api_key())
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True,
+            timeout=timeout, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise SecretsError(
+            "Credential lookup timed out; unlock Keychain or set SONIOX_API_KEY") from None
+    if result.returncode:
+        raise SecretsError(
+            "Credential unavailable without interaction; unlock Keychain or set SONIOX_API_KEY")
+    return result.stdout.strip()
 
 
 def get_api_key():

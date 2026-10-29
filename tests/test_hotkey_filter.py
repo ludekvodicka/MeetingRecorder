@@ -100,6 +100,7 @@ class TestTheFilterDoesNotOutliveItsWindow:
 
         monkeypatch.setattr(mw, "save_config", lambda config: None)
         window = MainWindow({"output_dir": str(tmp_path), "rts_translate": False,
+                             "meeting_detection": False,
                              "language": "en", "translation_target": "cs"})
         window._dictation_active = True
 

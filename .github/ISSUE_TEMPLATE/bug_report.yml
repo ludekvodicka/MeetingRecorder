@@ -63,8 +63,9 @@ body:
     attributes:
       label: Audio setup
       description: >
-        For anything touching recording: which system audio source and which microphone are
-        selected in Settings, and on macOS or Linux how you routed the system sound.
+        For anything touching recording: which system audio source and microphone are selected
+        in Settings. On macOS include the OS version and permission state; for BlackHole or
+        Linux, explain how you routed the system sound.
 
   - type: textarea
     id: extra

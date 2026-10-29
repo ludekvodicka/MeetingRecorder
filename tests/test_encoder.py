@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from audiorecorder.audio.encoder import _resample, mix_and_encode
+from audiorecorder.audio.encoder import NoAudioError, _resample, mix_and_encode
 
 
 def write_wav(path, samples, rate=48000, channels=1):
@@ -82,9 +82,10 @@ class TestMixAndEncode:
         mic = write_wav(tmp_path / "m.wav", np.zeros(0, dtype="float32"))
         out = str(tmp_path / "out.m4a")
 
-        mix_and_encode(system, mic, out)
-
-        assert os.path.getsize(out) > 0
+        with pytest.raises(NoAudioError):
+            mix_and_encode(system, mic, out)
+        assert not os.path.exists(out)
+        assert os.path.exists(mic) and os.path.exists(system)
 
     def test_different_sample_rates_are_reconciled(self, tmp_path):
         system = write_wav(tmp_path / "s.wav", tone(1.0, rate=48000), rate=48000, channels=2)
@@ -112,4 +113,123 @@ class TestMixAndEncode:
         mix_and_encode(quiet, mic2, str(tmp_path / "quiet.m4a"), system_volume=0.0)
 
         assert os.path.getsize(str(tmp_path / "loud.m4a")) > os.path.getsize(
-            str(tmp_path / "quiet.m4a"))
+            str(tmp_path / "quiet.m4a")
+        )
+
+
+def test_publish_collision_preserves_existing_output_and_sources(tmp_path):
+    mic = write_wav(tmp_path / "mic.wav", tone(0.1))
+    out = tmp_path / "out.m4a"
+    out.write_bytes(b"existing")
+    with pytest.raises(FileExistsError):
+        mix_and_encode(None, mic, str(out))
+    assert out.read_bytes() == b"existing"
+    assert os.path.exists(mic)
+
+
+def test_encode_failure_never_exposes_final_name(tmp_path, monkeypatch):
+    from audiorecorder.audio import encoder
+
+    mic = write_wav(tmp_path / "mic.wav", tone(0.1))
+    out = tmp_path / "out.m4a"
+    monkeypatch.setattr(
+        encoder, "_encode_aac", lambda *args: (_ for _ in ()).throw(OSError("disk full"))
+    )
+    with pytest.raises(OSError, match="disk full"):
+        mix_and_encode(None, mic, str(out))
+    assert not out.exists()
+    assert os.path.exists(mic)
+
+
+def test_cleanup_failure_is_saved_with_warning(tmp_path, monkeypatch):
+    from audiorecorder.audio import encoder
+
+    mic = write_wav(tmp_path / "mic.wav", tone(0.1))
+    out = tmp_path / "out.m4a"
+    monkeypatch.setattr(
+        encoder.os, "remove", lambda *args: (_ for _ in ()).throw(OSError("cleanup failed"))
+    )
+    result = mix_and_encode(None, mic, str(out))
+    assert result.cleanup_errors
+    with encoder.av.open(str(out)) as container:
+        assert next(container.decode(audio=0)).samples > 0
+    assert os.path.exists(mic)
+
+
+def test_streamed_resampling_preserves_phase_across_blocks(tmp_path):
+    from audiorecorder.audio.encoder import _read_aligned
+
+    path = write_wav(tmp_path / "mic.wav", tone(1.3, rate=44100, freq=300), rate=44100)
+    with sf.SoundFile(path) as source:
+        whole = _read_aligned(source, 0, 60000, 48000)
+        pieces = np.concatenate(
+            [
+                _read_aligned(source, start, min(4096, 60000 - start), 48000)
+                for start in range(0, 60000, 4096)
+            ]
+        )
+    assert np.allclose(whole, pieces, atol=1e-6)
+
+
+def test_streamed_encoder_reads_bounded_blocks_and_decodes_both_tracks(tmp_path, monkeypatch):
+    from audiorecorder.audio import encoder
+
+    system = write_wav(tmp_path / "system.wav", tone(2.1, freq=440), channels=2)
+    mic = write_wav(tmp_path / "mic.wav", tone(1.7, rate=44100, freq=880), rate=44100)
+    reads = []
+    original = sf.SoundFile.read
+
+    def bounded(self, frames=-1, *args, **kwargs):
+        reads.append(frames)
+        assert 0 <= frames <= 65538
+        return original(self, frames, *args, **kwargs)
+
+    monkeypatch.setattr(sf.SoundFile, "read", bounded)
+    out = tmp_path / "mix.m4a"
+    encoder.mix_and_encode(system, mic, str(out))
+    with encoder.av.open(str(out)) as container:
+        decoded = np.concatenate(
+            [frame.to_ndarray().flatten() for frame in container.decode(audio=0)]
+        )
+    assert len(decoded) / 48000 == pytest.approx(2.1, abs=0.05)
+    # Both tones survive downmix/resampling; the shorter source is padded with silence.
+    fft = np.abs(np.fft.rfft(decoded[:48000]))
+    assert fft[440] > 100 and fft[880] > 100
+    assert len(reads) > 10
+
+
+def test_nonmultiple_mix_blocks_do_not_insert_silence_at_each_boundary():
+    from audiorecorder.audio.encoder import _aac_blocks
+
+    blocks = [np.ones(777, dtype="float32") * 0.25 for _ in range(5)]
+    output = np.concatenate(list(_aac_blocks(blocks)))
+    assert np.all(output[:3885] > 0)
+    assert np.all(output[3885:] == 0)
+
+
+def test_multi_hour_sources_allocate_only_bounded_mix_blocks():
+    import itertools
+    import tracemalloc
+
+    from audiorecorder.audio.encoder import _mix_blocks
+
+    class VirtualSource:
+        frames = 8 * 3600 * 48000
+        samplerate = 48000
+
+        def seek(self, offset):
+            self.offset = offset
+
+        def read(self, count, **kwargs):
+            assert count <= 65538
+            return np.zeros((count, 2), dtype="float32")
+
+    tracemalloc.start()
+    try:
+        blocks = _mix_blocks(VirtualSource(), VirtualSource(), 48000, 1, 1)
+        for block in itertools.islice(blocks, 256):
+            assert len(block) <= 4096
+        _, peak = tracemalloc.get_traced_memory()
+        assert peak < 4_000_000
+    finally:
+        tracemalloc.stop()

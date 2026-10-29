@@ -24,24 +24,20 @@ Worth knowing when judging the impact of a finding:
   They are not encrypted, and anyone who can read that directory can read them.
 - **Audio leaves the machine only on an explicit action**: the Transcribe button uploads one
   recording to Soniox, and dictation streams the microphone to Soniox while the hotkey is held.
-- **The Cleanup button spawns the local `claude` executable** with the transcript directory as
-  its working directory, and runs it with permission prompts disabled so it can read and write
-  there unattended. Anyone able to plant an executable named `claude` earlier on the user's PATH
-  can therefore have it run. That is the same trust model as typing `claude` in a terminal.
+- **The Cleanup button spawns the local `claude` executable** with tools and MCP servers disabled.
+  The transcript is passed as untrusted input, and the application writes the returned summary.
+  Anyone able to plant an executable named `claude` earlier on the user's PATH can still have it
+  run. That is the same trust model as typing `claude` in a terminal.
 - **The summary prompt is a setting**, so a user who edits their own settings file changes what
   the local Claude CLI is asked to do. It is not reachable by anything outside the machine.
-- **Self-update** asks the GitHub Releases API, without credentials, for the latest release of
-  this repository 45 seconds after start and every two hours. On Windows and in the Linux
-  AppImage it then downloads the new build from that same release, only from the repository's
-  own release download URLs on `github.com`, and checks its SHA-256 against the
-  `SHA256SUMS.txt` published with it. A download that does not match is deleted and never run.
-  The verified build replaces the running file only after the application has exited, through
-  the new build itself started in helper mode. Release notes are shown as plain text.
-- **What the check protects against**: a corrupted or truncated download. It does not protect
-  against a compromised release: the checksums come from the same release as the build, and the
-  builds are unsigned (below).
+- **Updates** check GitHub Releases without credentials in packaged builds. Local custom builds
+  default to notification-only; the upstream release workflow marks official packages at build
+  time. Official Windows and Linux AppImage packages retain automatic updates, while macOS and
+  unpacked Linux builds notify only. Source runs keep checks off. SHA-256 checksums detect corrupt
+  downloads; they do not authenticate a release when supplied by that same release.
 
 ## Builds are unsigned
 
-Releases carry no code signature on any platform. Verify the SHA256 published with each release
-before running a download. Signing is a known gap, not an oversight.
+Official upstream releases are unsigned. Our custom macOS packages are ad-hoc signed for
+local integrity, without Developer ID or notarization. Verify the checksum of a package before
+installing it; ad-hoc signing does not establish a trusted publisher.

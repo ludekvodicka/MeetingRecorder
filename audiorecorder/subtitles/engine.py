@@ -12,6 +12,7 @@ session, does the sending, and reopens it if it dies before the recording does.
 import contextlib
 import logging
 import queue
+import re
 import threading
 import time
 
@@ -46,6 +47,8 @@ RECONNECT_DELAYS = (1, 2, 4)
 # behind the call.
 QUEUE_LIMIT = 200
 
+_SENTENCE_END = re.compile(r"[.!?][\"')\]]*$")
+
 
 class SubtitleEngine(QObject):
     """Owns one realtime session for the length of a recording."""
@@ -53,11 +56,14 @@ class SubtitleEngine(QObject):
     line_updated = pyqtSignal(str, str)         # the sentence being spoken, both languages
     # A settled line: when it was said, then both languages.
     line_finalized = pyqtSignal(str, str, str)
+    # A settled speaker line: when it was said, speaker label, then recognised text.
+    speaker_line_finalized = pyqtSignal(str, str, str)
     notice = pyqtSignal(str)                 # reconnecting, or giving up, and why
     error_occurred = pyqtSignal(str)
 
     def __init__(self, api_key, translate_to, source_languages=None,
-                 sample_rate=SUBTITLE_RATE):
+                 sample_rate=SUBTITLE_RATE, speaker_label=None,
+                 speaker_prefix=None, enable_speaker_diarization=False):
         super().__init__()
         if not api_key:
             raise ValueError("Subtitles need a Soniox API key.")
@@ -72,9 +78,13 @@ class SubtitleEngine(QObject):
         # two candidates narrows it to a choice it can actually make.
         self._source_languages = _clean_languages(source_languages)
         self._sample_rate = sample_rate
+        self._speaker_label = speaker_label
+        self._speaker_prefix = speaker_prefix
+        self._enable_speaker_diarization = enable_speaker_diarization
 
         self._audio = queue.Queue(maxsize=QUEUE_LIMIT)
         self._running = False
+        self._stop_event = threading.Event()
         self._worker = None
         self._session = None
         self._pairs = []
@@ -84,6 +94,9 @@ class SubtitleEngine(QObject):
         self._sent_plain = 0
         self._held_original = ""
         self._held_translation = ""
+        self._timed_speaker_lines = []
+        self._held_speaker = None
+        self._held_speaker_text = ""
 
     @property
     def translating(self):
@@ -102,9 +115,20 @@ class SubtitleEngine(QObject):
         with self._lock:
             return list(self._pairs)
 
+    def speaker_transcript(self):
+        """Finalized ``(time, speaker, text)`` lines, safe after :meth:`stop`."""
+        with self._lock:
+            return [line[1:] for line in self._timed_speaker_lines]
+
+    def timed_speaker_transcript(self):
+        """Internal merge form: monotonic sequence time followed by the public line."""
+        with self._lock:
+            return list(self._timed_speaker_lines)
+
     def start(self):
         if self._running:
             return
+        self._stop_event.clear()
         self._running = True
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
@@ -124,16 +148,29 @@ class SubtitleEngine(QObject):
                 pass
 
     def stop(self, timeout=5):
+        self.request_stop()
+        return self.wait_stopped(timeout)
+
+    def request_stop(self):
+        """Signal shutdown without waiting, allowing several engines to stop together."""
         self._running = False
+        self._stop_event.set()
         # Never a blocking put. Once the engine has given up reconnecting, nothing drains
         # the queue, and waiting for room in it here would hang the interface at the end of
         # every recording. The sentinel only wakes the worker sooner; the get() timeout
         # ends the loop regardless.
         with contextlib.suppress(queue.Full):
             self._audio.put_nowait(None)
-        if self._worker is not None:
-            self._worker.join(timeout=timeout)
+
+    def wait_stopped(self, timeout=5):
+        """Wait for a requested shutdown; keep a live worker reachable after timeout."""
+        worker = self._worker
+        if worker is not None:
+            worker.join(timeout=timeout)
+            if worker.is_alive():
+                return False
             self._worker = None
+        return True
 
     def _run(self):
         delays = list(RECONNECT_DELAYS)
@@ -152,10 +189,12 @@ class SubtitleEngine(QObject):
                 return
             if not delays:
                 self.notice.emit("Subtitles stopped. The recording is not affected.")
+                self._running = False
                 return
             wait = delays.pop(0)
             self.notice.emit(f"Subtitles reconnecting in {wait}s")
-            time.sleep(wait)
+            if self._stop_event.wait(wait):
+                return
 
     def _open_session(self):
         session = SonioxStreamingSession(
@@ -163,7 +202,9 @@ class SubtitleEngine(QObject):
             language_hints=list(self._source_languages),
             sample_rate=self._sample_rate,
             translate_to=self._translate_to,
-            on_pair=self._on_pair,
+            on_pair=None if self._speaker_mode else self._on_pair,
+            on_tokens=self._on_tokens if self._speaker_mode else None,
+            enable_speaker_diarization=self._enable_speaker_diarization,
         )
         session.connect()
         return session
@@ -186,6 +227,7 @@ class SubtitleEngine(QObject):
     def _close_session(self):
         if self._session is None:
             self._flush_held()
+            self._flush_speaker_line()
             return
         try:
             self._session.finish(timeout=5)
@@ -197,6 +239,65 @@ class SubtitleEngine(QObject):
         self._sent_translation = 0
         self._sent_plain = 0
         self._flush_held()
+        self._flush_speaker_line()
+
+    @property
+    def _speaker_mode(self):
+        return bool(self._speaker_label or self._speaker_prefix)
+
+    def _on_tokens(self, tokens):
+        """Turn finalized token metadata into stable, readable speaker lines.
+
+        Translation tokens are intentionally ignored: speaker labels describe who spoke,
+        so the transcript keeps the original speech only. Soniox can split a sentence
+        across many messages; a line settles at punctuation or when the speaker changes.
+        """
+        complete = []
+        with self._lock:
+            for token in tokens:
+                if not token.get("is_final", False):
+                    continue
+                if token.get("translation_status") == "translation":
+                    continue
+                text = token.get("text", "")
+                if not text:
+                    continue
+
+                speaker = self._speaker_name(token.get("speaker"))
+                if self._held_speaker_text and speaker != self._held_speaker:
+                    complete.append(self._finish_speaker_line_locked())
+                if not self._held_speaker_text:
+                    self._held_speaker = speaker
+                self._held_speaker_text += text
+                if _SENTENCE_END.search(text.rstrip()):
+                    complete.append(self._finish_speaker_line_locked())
+
+        for line in filter(None, complete):
+            self.speaker_line_finalized.emit(*line)
+
+    def _speaker_name(self, server_speaker):
+        if self._speaker_label:
+            return self._speaker_label
+        if server_speaker in (None, ""):
+            return self._speaker_prefix
+        return f"{self._speaker_prefix} {server_speaker}"
+
+    def _finish_speaker_line_locked(self):
+        text = self._held_speaker_text.strip()
+        speaker = self._held_speaker
+        self._held_speaker_text = ""
+        self._held_speaker = None
+        if not text:
+            return None
+        line = (_now(), speaker, text)
+        self._timed_speaker_lines.append((time.monotonic_ns(), *line))
+        return line
+
+    def _flush_speaker_line(self):
+        with self._lock:
+            line = self._finish_speaker_line_locked()
+        if line is not None:
+            self.speaker_line_finalized.emit(*line)
 
     def _on_pair(self, original, translation):
         """From the socket thread, whenever the recognised text changes."""

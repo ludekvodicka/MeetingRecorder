@@ -1,5 +1,56 @@
 # Meeting Recorder
 
+## Headless transcription
+
+Run from a source checkout with dependencies installed:
+
+```sh
+python -m audiorecorder.transcription.cli "/path/to/meeting.m4a" --language auto --json
+```
+
+Installing the package also provides `meeting-transcribe` with the same arguments.
+This uploads the specified recording to Soniox using the existing OS keyring credential
+or `SONIOX_API_KEY` (which takes precedence). No GUI, recording device, or prompt is used.
+Credential lookup runs in an isolated subprocess with a ten-second timeout. On macOS,
+Keychain interaction is disabled for this lookup. If access requires approval or unlock,
+the command exits with an error and releases its lock before any upload. Unlock/approve
+the existing credential interactively, or provide `SONIOX_API_KEY` through the job's
+secret environment; never put the key in a command argument, repository, or transcript.
+`--language` overrides the app setting; `auto` enables language identification without a hint.
+The command produces the original-language transcript, without requesting translation.
+To resume a GUI job, keep the same language and translation settings (CLI translation is off).
+`--dry-run` validates the input and destination without reading credentials or uploading.
+`--help` and `--version` are available.
+
+The sibling `.md` is published atomically without overwriting an existing file. Existing
+nonempty transcripts are skipped; empty output files require manual review before retry.
+GUI and CLI jobs share an OS lock in `.transcription.lock`; the small file remains on disk,
+but the OS releases ownership even after a crash. Do not remove it to bypass an active job.
+Legacy `.md.transcribing` files still block processing: verify the old CLI job has stopped
+before removing one.
+
+A sibling `.transcription.json` saves remote file/job IDs and settings, without credentials
+or transcript content. Click **Resume**, or repeat the CLI command with matching settings,
+to retrieve an existing job after a crash or network failure. Jobs are resumed on explicit
+action, never uploaded automatically at startup. If a submission response was lost before
+the job ID was saved, the app stops and asks you to check Soniox rather than submit another
+paid job. Older app versions did not save IDs, so their interrupted jobs cannot be recovered
+from local state. Retrying those recordings may incur another charge.
+
+The GUI queues Transcribe and Cleanup actions and shows progress on each recording.
+Duplicate actions and move/delete are disabled for queued and active recordings. Quit
+waits for the queue and its threads to finish. Checkpoint sidecars follow audio when moved,
+renamed or deleted; lock files remain at their original paths.
+
+Recording moves, renames and deletes share this lock and preserve sidecars.
+See [batch transcription architecture](docs/architecture/batch-transcription.md) for ownership
+and recovery contracts.
+
+Exit codes: `0` completed/skipped/dry-run, `1` operational failure, `2` invalid input,
+`130` interrupted. With `--json`, the final result contains `status`, `audio`, `transcript`
+and an optional `message`. Success results go to stdout, errors and progress to stderr.
+Provider error bodies are not printed because they may contain sensitive data.
+
 [![CI](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/ci.yml)
 [![Release build](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/release.yml/badge.svg)](https://github.com/ludekvodicka/MeetingRecorder/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/ludekvodicka/MeetingRecorder)](https://github.com/ludekvodicka/MeetingRecorder/releases/latest)
@@ -14,8 +65,9 @@ timestamps, and hand that transcript to the Claude CLI for a summary.
 It also does push-to-talk dictation. Hold Ctrl+Space anywhere, speak, let go, and the text
 appears where your caret is.
 
-Written for Google Meet and Teams calls in Czech and English, on Windows. It runs on macOS
-and Linux too, with the caveats in the support table below.
+Written for Google Meet and Teams calls in Czech and English. It captures system audio
+natively on Windows and modern macOS; Linux and older macOS releases have the routing
+caveats in the support table below.
 
 ![The main window with a few recordings](docs/screenshot.png)
 
@@ -52,6 +104,48 @@ and the recording is transcribed again afterwards for the summary. You are bille
 The button is green whenever a live session is running, and switching it off ends that
 session immediately, mid-recording included.
 
+**Labels speakers live.** Switch on **Live Speakers** to send the microphone and system
+audio through separate realtime streams. Microphone speech is labelled **Me**; the remote
+track is diarized as **Remote 1**, **Remote 2**, and so on. As labels appear, **Name
+Speakers** maps them to participant names. The final mapping applies to the complete call and
+is saved as both `.speakers.md` and structured `.speakers.json` after the M4A safely encodes.
+Live labels are immediate aids; the later batch transcription remains more accurate. This
+feature is off by default and adds up to two paid Soniox realtime streams.
+
+**Offers recording when a meeting appears.** On macOS, stable Teams, Zoom, Webex, and Slack
+Huddle windows produce a non-modal recording prompt. An optional least-privilege Brave/Chrome/Edge
+companion covers Google Meet, Zoom Web, and Teams Web. It can see only those meeting pages,
+has no history/tab-capture permission, and reports to `127.0.0.1` only. macOS Calendar is a
+separate opt-in signal for imminent events with attendees or a recognized conference link.
+Modern Teams is also recognized from repeated changes to its local media-stack file metadata;
+the detector does not read call logs, messages, or meeting content. Settings shows the latest
+native-window and Teams-media diagnostic state. If macOS redacts Teams window titles, the
+detector can still recognize the call-control surface from its non-content window geometry.
+
+On macOS, closing the main window keeps Meeting Recorder in the menu bar so detection remains
+available. Click the menu-bar icon to start or stop recording, or open the app. Quit the app
+from its Dock menu. **Launch at login** is a
+separate opt-in in Settings, managed by macOS Service Management and visible in the system's
+Login Items controls.
+
+The installed macOS app uses native notification actions, with an in-app fallback when
+notifications are unavailable. Settings reports notification authorization, capture test
+results, selected/resolved devices and observed login-item status. Focus can suppress banners.
+
+Start and stop countdowns default independently to **5 seconds** (configurable from 5–120).
+Automatic recording and automatic stopping are separate opt-ins. The macOS Teams/Zoom
+call-control detector uses Accessibility with explicit inspection opt-in. No app version is
+approved by default: use the temporary supervised test, then approve only after completing
+[the real-call checklist](docs/native-call-test-checklist.md). Approval expires when the app
+version or matcher changes. Unattended capture also requires a successful audio test for this
+build and device configuration. Window/media, Calendar and browser signals remain advisory.
+Unknown or hidden controls preserve recording; optional window-absence stopping has a
+separate test/approval. See [native lifecycle notes](docs/native-lifecycle.md) for boundaries.
+
+Recording startup and shutdown run outside the GUI thread. Saving uses a separate bounded
+encoder queue and atomically publishes validated audio. Empty capture is reported as an
+error; failed encodes retain source WAVs for recovery.
+
 ![Live subtitles during a recording](docs/screenshot-subtitles.png)
 
 **Keeps the library on disk.** There is no database. An `.m4a` in the output directory is a
@@ -69,26 +163,34 @@ please report what you find.
 | | Windows | macOS | Linux |
 | --- | --- | --- | --- |
 | Microphone recording | yes | yes, asks for permission | yes |
-| System audio | yes, straight from the default output | needs a virtual device, see below | needs a `.monitor` source, see below |
+| System audio | yes, straight from the default output | native on macOS 13+; BlackHole fallback | needs a `.monitor` source, see below |
 | Transcription and summaries | yes | yes | yes |
-| Live subtitles (RTS Translate) | yes | only with a system source | only with a monitor source |
+| Live subtitles (RTS Translate) | yes | yes on macOS 13+ | only with a monitor source |
+| Live speaker labels | yes | yes on macOS 13+ | only with a monitor source |
+| Native meeting popup | no | Teams, Zoom, Webex, Slack Huddles | no |
+| Browser meeting popup | optional Brave/Chrome/Edge companion | optional Brave/Chrome/Edge companion | optional Brave/Chrome/Edge companion |
+| Calendar meeting signal | no | opt-in through EventKit | no |
 | Dictation hotkey | yes | yes, needs Accessibility permission | X11 only, not on Wayland |
 | Paste after dictation | yes | yes, sends Cmd+V | X11, and needs `xclip` or `xsel` |
 | Tested by the maintainer | yes | no | no |
 
-**System audio outside Windows.** Windows can record its own output directly through WASAPI
-loopback, and needs no setup. macOS and Linux have no such thing, so the second track is an
-ordinary input device that you route your sound into, and you pick it in Settings:
+**System audio.** Windows records its default output through WASAPI loopback. On macOS 13 or
+newer, leaving the system source on **Default** uses ScreenCaptureKit and needs no virtual
+audio device. The first recording asks for Screen & System Audio Recording permission; grant
+it in System Settings > Privacy & Security and restart Meeting Recorder when macOS requests
+that.
+
+The explicit routed-input choices remain available:
 
 - **Linux** - PulseAudio and pipewire-pulse create a `.monitor` source for every output. Pick
   the monitor of the output you are listening on. If it does not appear in the list, route the
   application to it with `pavucontrol` instead.
-- **macOS** - install a virtual audio device such as
+- **macOS 12 or an explicit compatibility setup** - install a virtual audio device such as
   [BlackHole](https://github.com/ExistentialAudio/BlackHole), create a multi-output device in
   Audio MIDI Setup that feeds both your speakers and BlackHole, then pick BlackHole here.
 
-Without one of those, the recording is your microphone only. The application says so in the
-status bar rather than pretending it captured the call.
+On Linux and macOS 12, without a routed system source the recording is microphone-only. The
+application says so in the status bar rather than pretending it captured the call.
 
 **Wayland.** No application can watch the keyboard globally on Wayland, so dictation is turned
 off there and the button says why. Recording and transcription are unaffected.
@@ -98,43 +200,41 @@ off there and the button says why. Recording and transcription are unaffected.
 Download the build for your platform from
 [Releases](https://github.com/ludekvodicka/MeetingRecorder/releases).
 
-**The builds are unsigned.** Check the SHA256 of your download against `SHA256SUMS.txt` in the
-same release before running it:
+Unless a release explicitly says it is notarized, its builds are unsigned. Check the SHA256
+of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Meeting-Recorder-0.3.0-x64.exe                    # Linux, macOS, Git Bash
-certutil -hashfile Meeting-Recorder-0.3.0-x64.exe SHA256    # Windows
+sha256sum Meeting-Recorder-0.3.3-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.3.3-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.3.3-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
   about an unknown publisher.
 - **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
   On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
-  `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across.
+  `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across. The DMG also
+  contains the optional unpacked browser companion and a next-meeting quick start. The app
+  keeps its own permanent companion copy: open **Settings > Reveal Companion Folder** before
+  loading it in Brave, Chrome, or Edge.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 
 ## Updates
 
-The application checks the Releases page 45 seconds after it starts and every two hours after
-that. The version in the bottom-right corner of the window turns into the update state; click it
-for the release notes and the **Check now**, **Restart and install** and **View on GitHub**
-buttons.
+This custom branch incorporates origin/main v0.3.3 while retaining native macOS capture,
+meeting detection, live speakers, and recoverable queued transcription. Upstream checks
+and release notes appear in the version indicator; source runs keep update checks off.
+Packaged builds check after 45 seconds and then every two hours.
 
-- **Windows** `.exe`, also when run from the portable `.zip`, and the **Linux AppImage**
-  download a newer release in the background and check it against `SHA256SUMS.txt` of the same
-  release. Nothing is installed until you click **Restart and install**, or until you next quit
-  the application normally. The file is replaced where it is and keeps its name, so a shortcut
-  to it keeps working; the window title shows the new version.
-- **macOS** and the **Linux `.tar.gz`** only tell you that a newer release exists and link to
-  it. The same applies when the folder holding the program is not writable.
-- **From source** the update check is off.
+Locally packaged builds default to custom and only notify about upstream releases on every platform. They never
+download or install upstream binaries automatically, because those binaries omit our
+custom features. The upstream release workflow explicitly marks its official packages;
+those retain automatic updates on Windows and the Linux AppImage, while macOS and unpacked
+Linux packages notify only. Source runs do not check for updates. An official build can be
+reproduced locally by setting `MEETING_RECORDER_BUILD_CHANNEL=official` at build time; do
+this only when its code is intended to be replaced by official upstream releases.
 
-An update never installs while a recording is running or being saved, while a transcription
-or cleanup runs or while dictation is on, and never while the computer is shutting down or
-logging off. If an update fails, the status bar says so and the program you had stays in place.
-Should a shutdown cut an update off halfway, the previous program is left next to it with
-`.old` appended to its name: rename it back to restore it.
 
 ## Set it up
 
@@ -144,11 +244,22 @@ operating system keyring, not in a configuration file. For development or on a m
 keyring you can set `SONIOX_API_KEY` in the environment instead, which takes precedence.
 
 **Claude CLI, optional.** Only needed for the Cleanup button. Install
-[Claude Code](https://claude.com/claude-code) and make sure `claude` is on your PATH.
+[Claude Code](https://claude.com/claude-code). Shell launches use your PATH; on macOS, Finder
+launches also look in the Homebrew and standard Claude/per-user installation locations.
 
 **Audio devices.** Settings lists what your system offers. Leaving both on Default is right for
-most Windows machines. Devices are remembered by name, so unplugging and replugging a headset
-does not silently switch you to a different microphone.
+most Windows machines and for macOS 13 or newer. Devices are remembered by name, so unplugging
+and replugging a headset does not silently switch you to a different microphone.
+
+**macOS permissions.** The first recording asks for Microphone and Screen & System Audio
+Recording access. After granting screen/audio capture, restart the app. Dictation separately
+needs Accessibility access so the global hotkey and Cmd+V can reach other applications.
+Calendar access is requested only after its Settings checkbox is enabled; EventKit exposes no
+read-only tier, but Meeting Recorder only reads a narrow upcoming-event window and never edits
+events.
+
+For a complete install-to-first-call walkthrough, use
+[the next-meeting quick start](docs/next-meeting-quick-start.md).
 
 ## Your data stays on your machine
 
@@ -158,7 +269,10 @@ scans, syncs or uploads them on its own.
 Audio leaves your computer only when you ask for it: the Transcribe button uploads that one
 recording to Soniox, dictation streams your microphone to Soniox while you hold the key, and
 RTS Translate streams the other side of the call to Soniox for as long as it is switched on
-and a recording is running.
+and a recording is running. Live Speakers streams the microphone and system tracks to separate
+Soniox realtime sessions while its toggle and a recording are active. Meeting detection stays
+local: native window titles, optional Calendar events, and sanitized browser-companion
+heartbeats are not uploaded.
 The Cleanup button runs the Claude CLI on your machine, which sends the transcript to Anthropic
 under whatever agreement your Claude account has. Read the privacy terms of both services and
 decide whether the calls you record belong there. There is no telemetry and no account of our
@@ -190,11 +304,29 @@ pytest
 python scripts/build.py package   # writes installers into release/
 ```
 
+On macOS, PyInstaller ad-hoc signs local builds and `package` smoke-tests the frozen runtime
+before creating the DMG. The packaging command removes the unpackaged app from `dist/` after
+the DMG succeeds so macOS cannot register two app bundles with the same identifier and attach
+Screen Recording permission to the wrong copy. Run `build` instead when you explicitly need
+the unpackaged app. For a distributable Developer ID build, first store a `notarytool` profile
+in Keychain, then run:
+
+```sh
+MACOS_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+MACOS_NOTARY_PROFILE="meeting-recorder-notary" \
+python scripts/build.py package
+```
+
+The command signs with hardened runtime, submits the DMG to Apple, staples the ticket, and
+verifies both the ticket and Gatekeeper assessment. Credentials stay in Keychain; the profile
+name is the only notarization value passed to the build.
+
 Linux also needs the Qt and PortAudio system libraries; the list CI installs is in
 `.github/workflows/ci.yml`. The AppImage step needs `appimagetool` on PATH.
 
-The tests cover the parts that need no hardware: the transcript format, the mixing maths, the
-settings, the recording scanner and the push-to-talk logic. Everything else needs a real
+The tests cover the parts that need no hardware: the transcript format, mixing maths, device
+selection, native PCM conversion, settings, recording scanner and push-to-talk logic. macOS
+CI also builds and starts the frozen runtime in smoke-test mode. Real capture still needs a
 machine, and `docs/manual-test-checklist.md` lists what to try before a release.
 
 ## Contributing

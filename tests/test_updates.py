@@ -17,7 +17,11 @@ from PyQt6.QtWidgets import QApplication
 from audiorecorder.shared.desktop.autoupdate.feed import UpdateFeedGithub
 from audiorecorder.shared.desktop.autoupdate.installer import UpdateInstaller
 from audiorecorder.shared.desktop.autoupdate.manager import UpdateManager
-from audiorecorder.shared.desktop.autoupdate.runtime import UpdateResolution, UpdateTargetFile
+from audiorecorder.shared.desktop.autoupdate.runtime import (
+    UpdateResolution,
+    UpdateRuntime,
+    UpdateTargetFile,
+)
 from audiorecorder.shared.desktop.autoupdate.stager import UpdateStager
 from audiorecorder.shared.desktop.autoupdate.status import UpdateInstalling, UpdateReady
 from audiorecorder.shared.desktop.autoupdate.tests.support import (
@@ -260,3 +264,75 @@ class TestHelperDispatch:
             [sys.executable, "-m", "audiorecorder", "--apply-update", str(manifest)],
             cwd=ROOT, capture_output=True, text=True, timeout=60)
         assert result.returncode == 2, result.stderr
+
+
+@pytest.mark.parametrize('platform', ['win32', 'linux', 'darwin'])
+def test_custom_packaged_builds_only_notify(platform, app, tmp_path, monkeypatch):
+    from audiorecorder import updates as module
+    from audiorecorder.shared.desktop.autoupdate.status import UpdateAvailable
+
+    host = ManualHost()
+    transport = FakeTransport({LATEST: release_json(NEW, FILES)}, file_urls(NEW, FILES))
+    monkeypatch.setattr(AppUpdates, 'owner', OWNER)
+    monkeypatch.setattr(AppUpdates, 'repository', REPO)
+    monkeypatch.setattr(module.sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(module.sys, 'platform', platform)
+    monkeypatch.setattr(module.platformdirs, 'user_cache_dir', lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(module, 'QtUpdateHost', lambda parent: host)
+    monkeypatch.setattr(module, 'UpdateTransport', lambda *args: transport)
+    monkeypatch.setattr(UpdateRuntime, 'writable', staticmethod(lambda path: True))
+    monkeypatch.setattr(AppUpdates, 'target', staticmethod(lambda: (
+        None if platform == 'darwin' else
+        UpdateTargetFile(tmp_path / 'app', FILE_PATTERN, onefile_parent=False)
+    )))
+    updates = AppUpdates.create(app)
+    updates.start()
+    host.advance(45)
+    host.run_jobs()
+    assert isinstance(updates._manager.status.state, UpdateAvailable)
+    assert updates.view().actions == ('open_release', 'check')
+    assert not transport.calls or transport.calls == [LATEST]
+    assert not list(tmp_path.glob('**/pending.json'))
+    assert not list(tmp_path.glob('**/*.part'))
+    updates.quit(False)
+
+
+@pytest.mark.parametrize(
+    ("platform", "official", "expected"),
+    [("win32", True, "automatic"), ("linux", True, "automatic"),
+     ("darwin", True, "notify"), ("win32", False, "notify"),
+     ("linux", False, "notify")],
+)
+def test_build_identity_selects_update_policy(
+    platform, official, expected, app, tmp_path, monkeypatch
+):
+    from audiorecorder import updates as module
+
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(module.sys, "platform", platform)
+    monkeypatch.setattr(module.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(UpdateRuntime, "writable", staticmethod(lambda path: True))
+    monkeypatch.setattr(AppUpdates, "target", staticmethod(lambda: (
+        None if platform == "darwin" else
+        UpdateTargetFile(tmp_path / "app", FILE_PATTERN, onefile_parent=False)
+    )))
+    if official:
+        marker = tmp_path / "audiorecorder" / "build-channel.txt"
+        marker.parent.mkdir()
+        marker.write_text("official\n", encoding="utf-8")
+    updates = AppUpdates.create(app)
+    assert updates._manager.status.mode == expected
+    updates.quit(False)
+
+
+def test_missing_or_invalid_build_marker_fails_safe(tmp_path, monkeypatch):
+    from audiorecorder import updates as module
+
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(module.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setenv("MEETING_RECORDER_BUILD_CHANNEL", "official")
+    assert not module.is_official_build()
+    marker = tmp_path / "audiorecorder" / "build-channel.txt"
+    marker.parent.mkdir()
+    marker.write_text("custom", encoding="utf-8")
+    assert not module.is_official_build()

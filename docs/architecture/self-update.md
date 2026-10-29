@@ -1,5 +1,14 @@
 # Self-update
 
+## Custom branch policy
+
+This branch keeps the shared updater and its tests, but AppUpdates converts every packaged
+runtime to notification-only mode. Source runs remain off. Upstream binaries lack our
+native macOS capture, meeting lifecycle and recoverable transcription, so automatically
+installing them would drop features. Update the custom build through a tested merge of
+origin/main and a fresh package. The automatic behavior described below is the upstream
+implementation retained in the shared library, not the policy of our packaged app.
+
 ## Decision
 
 Releases up to 0.2.0 only told the user that a newer release existed; installing it was left to

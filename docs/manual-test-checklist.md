@@ -86,11 +86,48 @@ and say in the release notes what was not exercised.
 
 ### macOS
 
-- [ ] The unsigned `.dmg` opens after `xattr -cr` on the app, and the app starts
-- [ ] macOS asks for microphone permission on the first recording
-- [ ] Recording with no system source configured records the microphone only, and says so
+- [ ] The `.dmg` opens and the app starts; for an unsigned local build, confirm the documented
+      `xattr -cr` fallback still works
+- [ ] On macOS 13+, leave the system source on Default and start a recording: macOS asks for
+      Screen & System Audio Recording and microphone permission
+- [ ] Grant screen/audio capture, restart the app, and confirm the system meter moves while
+      audio plays without BlackHole installed
+- [ ] Stop: the resulting `.m4a` contains both system audio and the microphone
+- [ ] Set the system source to "None (microphone only)": the status bar says so and the result
+      contains no system audio
 - [ ] With BlackHole installed and a multi-output device set up, selecting BlackHole as the
-      system source captures the system sound
+      explicit system source still captures system sound
+- [ ] Record, stop, then record again in the same app process; native capture starts both times
+- [ ] Switch RTS Translate on and confirm native system audio feeds live subtitles
+- [ ] Switch Live Speakers on: microphone speech appears as Me and two remote voices remain
+      distinct as Remote labels; Name Speakers updates future lines
+- [ ] Stop after naming speakers: `.speakers.md` and `.speakers.json` appear only after the
+      M4A succeeds, contain the final names for earlier lines too, and follow rename/delete
+- [ ] Open a Teams or Zoom meeting window: one prompt appears after the stable detection;
+      dismissing it does not produce another prompt until that meeting window disappears
+- [ ] Join a modern Teams call whose window title is only the meeting subject: within about
+      20 seconds Settings reports Teams media monitor active and one prompt appears; ordinary
+      Teams browsing and chat do not trigger it
+- [ ] Reveal the app-bundled browser companion from Settings and load it in Brave/Chrome/Edge;
+      confirm the status bar says Browser: connected, open a Google Meet code URL, and confirm
+      the same prompt; moving to a non-meeting page removes the signal
+- [ ] Enable Calendar detection, grant Calendar access, and confirm an imminent attended or
+      linked event prompts while a personal reminder and an all-day event do not
+- [ ] Enable automatic recording, open a detected app/browser meeting, and cancel the visible
+      10-second countdown; repeat and let it finish; confirm Calendar alone never counts down
+- [ ] Begin a countdown and close the meeting before zero: no recording starts
+- [ ] Click the menu-bar icon with the main window open, minimized and closed: the menu shows
+      Start Recording, Stop Recording and Open Meeting Recorder without raising the window
+- [ ] Start and stop recording from that menu: the enabled actions follow the recording state,
+      rapid repeated clicks do not duplicate operations, and the saved audio plays back
+- [ ] During an automatic start countdown, use Start Recording: capture starts once; Stop
+      Recording also works during an automatic stop countdown
+- [ ] While dictation is active or capture shutdown is unresolved, Start Recording is disabled;
+      Open Meeting Recorder provides access to the controls and any capture recovery
+- [ ] Close the macOS main window: it hides, the menu-bar icon remains, and a meeting still
+      prompts; choose Quit from the Dock menu and confirm the process and localhost bridge stop
+- [ ] Enable Launch at login, log out/in, and confirm the app launches and detects a meeting;
+      disable it and confirm macOS no longer launches it
 - [ ] Dictation asks for Accessibility permission, and works once it is granted
 - [ ] Paste sends Cmd+V, not Ctrl+V
 - [ ] Note whether Ctrl+Space collides with the input source switcher on this machine
@@ -117,3 +154,15 @@ The two backends have to stay interchangeable, so run these on every platform yo
 - [ ] Both meters move independently
 - [ ] The temporary `_rec_system_*.wav` and `_rec_mic_*.wav` files are gone after encoding
 - [ ] A recording that is stopped immediately still produces a valid file
+
+## Custom build update policy
+
+- [ ] In a packaged custom build, a newer upstream release shows notes and a release link,
+  without a download or Restart and install action, on every platform.
+- [ ] Preserve native macOS capture, meeting/calendar/browser detection and transcription
+  queue/recovery when integrating origin/main. Run the combined root and shared test suites.
+- [ ] Check source-run updates stay off; real capture/transcription acceptance is separate
+  from the mocked provider and updater tests.
+
+The automatic updater scenarios above describe the retained upstream library. Our custom
+application selects notification-only mode so stock binaries cannot replace our features.

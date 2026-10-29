@@ -1,13 +1,21 @@
+import shutil
+import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import av
 
+from audiorecorder.transcription.jobs import TranscriptionJob, checkpoint_status
+
 # Everything written beside a recording and named after it. One list, because delete,
 # rename and move each used to carry their own idea of what belongs to a recording, and
 # delete's idea left the summary behind.
-SIDECAR_SUFFIXES = (".md", ".summary.md", ".live.md")
+SIDECAR_SUFFIXES = (
+    ".md", ".summary.md", ".live.md", ".speakers.md", ".speakers.json",
+    ".transcription.json",
+)
 
 
 def sidecars(recording_path):
@@ -29,6 +37,7 @@ class Recording:
     duration_seconds: float
     is_transcribed: bool
     transcript_path: str
+    transcription_status: str = ""
 
 
 class RecordingManager:
@@ -53,6 +62,7 @@ class RecordingManager:
                 duration_seconds=duration,
                 is_transcribed=transcript.exists(),
                 transcript_path=str(transcript) if transcript.exists() else "",
+                transcription_status="" if transcript.exists() else checkpoint_status(f),
             ))
         return recordings
 
@@ -68,22 +78,59 @@ class RecordingManager:
 
     def generate_filename(self):
         ts = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        return f"Recording {ts}.m4a"
+        return f"Recording {ts} {uuid.uuid4().hex[:8]}.m4a"
 
     def delete(self, recording_path):
-        p = Path(recording_path)
-        if p.exists():
-            p.unlink()
-        for sidecar in sidecars(recording_path):
-            sidecar.unlink()
+        recording = Path(recording_path)
+        if not recording.parent.exists():
+            return
+        with TranscriptionJob(recording).locked():
+            recording.unlink(missing_ok=True)
+            for sidecar in sidecars(recording):
+                sidecar.unlink()
 
     def rename(self, recording_path, new_name):
-        p = Path(recording_path)
-        new_path = p.parent / f"{new_name}.m4a"
-        if new_path.exists():
-            raise FileExistsError(f"File already exists: {new_path}")
-        companions = sidecars(recording_path)
-        p.rename(new_path)
-        for sidecar in companions:
-            sidecar.rename(new_path.with_name(new_name + _suffix_of(p, sidecar)))
-        return str(new_path)
+        recording = Path(recording_path)
+        target = recording.with_name(f"{new_name}.m4a")
+        return self._transfer(recording, target)
+
+    def move(self, recording_path, destination):
+        recording = Path(recording_path)
+        return self._transfer(recording, Path(destination) / recording.name)
+
+    @staticmethod
+    def _transfer(recording, target):
+        if recording.absolute() == target.absolute():
+            return str(recording)
+        # A CLI transcription can outlive the GUI's in-memory busy-path set. Lock
+        # both names until audio and all recovery state have moved together.
+        with ExitStack() as locks:
+            locks.enter_context(TranscriptionJob(recording).locked())
+            locks.enter_context(TranscriptionJob(target).locked())
+            pairs = [(recording, target)] + [
+                (sidecar, target.with_name(target.stem + _suffix_of(recording, sidecar)))
+                for sidecar in sidecars(recording)
+            ]
+            for _, destination in pairs:
+                if destination.exists() or destination.is_symlink():
+                    raise FileExistsError(f"File already exists: {destination}")
+            moved = []
+            try:
+                for source, destination in pairs:
+                    shutil.move(str(source), str(destination))
+                    moved.append((source, destination))
+            except Exception as error:
+                # Restore completed moves before allowing a retry on either name.
+                failures = []
+                for source, destination in reversed(moved):
+                    try:
+                        if source.exists() or source.is_symlink():
+                            raise FileExistsError(source)
+                        shutil.move(str(destination), str(source))
+                    except OSError:
+                        failures.append(str(destination))
+                if failures:
+                    raise RuntimeError(
+                        f"Move failed; files still need recovery: {', '.join(failures)}") from error
+                raise
+        return str(target)

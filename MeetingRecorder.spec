@@ -6,28 +6,34 @@ directory that scripts/build.py turns into an AppImage. Nothing secret is bundle
 Soniox key lives in the keyring, and the settings live in the user's config directory.
 """
 
+import os
 import sys
 from pathlib import Path
-
-from PyInstaller.utils.hooks import collect_all
 
 sys.path.insert(0, SPECPATH)
 from audiorecorder.version import __version__
 
 ASSETS = Path(SPECPATH) / "audiorecorder" / "assets"
+BROWSER_EXTENSION = Path(SPECPATH) / "browser-extension"
+MACOS_ENTITLEMENTS = Path(SPECPATH) / "packaging" / "macos.entitlements"
+MACOS_CODESIGN_IDENTITY = os.environ.get("MACOS_CODESIGN_IDENTITY")
 
-datas = [(str(ASSETS), "audiorecorder/assets")]
+datas = [
+    (str(ASSETS), "audiorecorder/assets"),
+    (str(BROWSER_EXTENSION), "browser-extension"),
+]
+# Local builds fail safe as custom. Only an explicitly marked official release bundles
+# this marker; runtime environment variables cannot change the packaged update policy.
+if os.environ.get("MEETING_RECORDER_BUILD_CHANNEL") == "official":
+    datas.append((str(Path(SPECPATH) / "packaging" / "official" / "build-channel.txt"),
+                  "audiorecorder"))
 binaries = []
 # WASAPI loopback is a Windows-only dependency, and PyInstaller must not look for it
 # anywhere else.
 hiddenimports = ["pyaudiowpatch"] if sys.platform == "win32" else []
 
-# Collected wholesale because Qt loads its image, SVG and multimedia plugins by path at
-# runtime, which static analysis does not see.
-qt_datas, qt_binaries, qt_hiddenimports = collect_all("PyQt6")
-datas += qt_datas
-binaries += qt_binaries
-hiddenimports += qt_hiddenimports
+# PyInstaller's hooks for the five imported Qt modules collect their required plugins and
+# frameworks. Collecting all of PyQt6 also pulled in unused QML, 3D, SQL and design tools.
 
 a = Analysis(
     [str(Path(SPECPATH) / "audiorecorder" / "__main__.py")],
@@ -74,8 +80,8 @@ elif sys.platform == "darwin":
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
-        codesign_identity=None,
-        entitlements_file=None,
+        codesign_identity=MACOS_CODESIGN_IDENTITY,
+        entitlements_file=str(MACOS_ENTITLEMENTS),
     )
     collected = COLLECT(exe, a.binaries, a.datas, strip=False, upx=True, name="MeetingRecorder")
     app = BUNDLE(
@@ -90,6 +96,16 @@ elif sys.platform == "darwin":
             # Without this key macOS denies the microphone without even showing a prompt.
             "NSMicrophoneUsageDescription":
                 "Meeting Recorder records your microphone for meetings and dictation.",
+            "NSScreenCaptureUsageDescription":
+                "Meeting Recorder captures system audio so calls can be recorded.",
+            "NSAudioCaptureUsageDescription":
+                "Meeting Recorder captures system audio so calls can be recorded.",
+            "NSCalendarsFullAccessUsageDescription":
+                "Meeting Recorder reads upcoming meetings to offer recording at the "
+                "scheduled start time.",
+            "NSCalendarsUsageDescription":
+                "Meeting Recorder reads upcoming meetings to offer recording at the "
+                "scheduled start time.",
             "NSHighResolutionCapable": True,
         },
     )

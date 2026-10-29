@@ -53,6 +53,13 @@ jobs:
       - name: Check the version is well formed
         run: python scripts/check_release_version.py
 
+      - name: Build and smoke-test the macOS app bundle
+        if: runner.os == 'macOS'
+        run: |
+          python scripts/build.py build
+          python scripts/build.py smoke
+          codesign --verify --deep --strict "dist/Meeting Recorder.app"
+
   # Runs after a push has landed, so it cannot prevent a leak: a pushed secret is already
   # exposed and has to be rotated. It exists to stop a contributor pull request that
   # carries a secret from reaching main. The maintainer's own gate is the pre-push hook.

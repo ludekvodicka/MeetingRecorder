@@ -30,7 +30,7 @@ def owner(app, lock_name):
     assert instance.take_ownership(), "the first copy must be allowed to run"
     yield instance
     if instance._server is not None:
-        instance._server.close()
+        instance.close()
 
 
 class TestSingleInstance:
@@ -55,12 +55,11 @@ class TestSingleInstance:
         assert asked, "the running copy has to hear that it is wanted"
 
     def test_ownership_is_available_again_once_released(self, app, owner):
-        owner._server.close()
-        owner._server = None
+        owner.close()
 
         successor = SingleInstance(owner._name)
         try:
             assert successor.take_ownership(), "closing the app must free the lock"
         finally:
             if successor._server is not None:
-                successor._server.close()
+                successor.close()

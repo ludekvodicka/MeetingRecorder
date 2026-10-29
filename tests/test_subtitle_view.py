@@ -49,6 +49,32 @@ class TestSettledLines:
         assert "<b>not bold</b>" in view._settled.toPlainText()
 
 
+class TestSpeakerLines:
+    def test_the_speaker_and_speech_are_shown(self, view):
+        view.append_speaker_line("10:14:02", "Me", "I will send it.")
+        text = view._settled.toPlainText()
+        assert "Me" in text
+        assert "I will send it." in text
+
+    def test_remote_identity_is_visible(self, view):
+        view.append_speaker_line("10:14:03", "Remote 2", "Agreed.")
+        assert "Remote 2" in view._settled.toPlainText()
+
+    def test_markup_in_a_speaker_line_is_escaped(self, view):
+        view.append_speaker_line("10:14:04", "<Me>", "<b>literal</b>")
+        text = view._settled.toPlainText()
+        assert "<Me>" in text
+        assert "<b>literal</b>" in text
+
+    def test_mapping_button_only_enables_after_a_remote_speaker_appears(self, view):
+        view.set_speaker_mapping_visible(True)
+        view.set_speaker_mapping_available(0)
+        assert not view._btn_speaker_names.isEnabled()
+        view.set_speaker_mapping_available(2)
+        assert view._btn_speaker_names.isEnabled()
+        assert "(2)" in view._btn_speaker_names.text()
+
+
 class TestPendingLine:
     def test_the_pending_line_is_replaced_not_appended(self, view):
         view.set_pending("Hel", "Ah")

@@ -108,3 +108,38 @@ class TestFailureIsContained:
 
         assert calls == [1], "one failure is enough to disable the tap"
         assert backend._system_tap is None
+
+
+class TestMicrophoneTap:
+    def test_the_microphone_has_an_independent_16khz_tap(self):
+        backend = FakeBackend()
+        backend._prepare_mic_tap(48000)
+        received = []
+        backend.set_mic_tap(received.append)
+
+        backend._feed_mic_tap(block())
+
+        assert received
+        assert isinstance(received[0], bytes)
+
+    def test_clearing_the_microphone_tap_stops_it(self):
+        backend = FakeBackend()
+        backend._prepare_mic_tap(48000)
+        received = []
+        backend.set_mic_tap(received.append)
+        backend._feed_mic_tap(block())
+        backend.set_mic_tap(None)
+        backend._feed_mic_tap(block())
+        assert len(received) == 1
+
+    def test_a_bad_microphone_consumer_does_not_disable_system_subtitles(self, backend):
+        system = []
+        backend.set_system_tap(system.append)
+        backend._prepare_mic_tap(48000)
+        backend.set_mic_tap(lambda chunk: 1 / 0)
+
+        backend._feed_mic_tap(block())
+        backend._feed_tap(block())
+
+        assert backend._mic_tap is None
+        assert system

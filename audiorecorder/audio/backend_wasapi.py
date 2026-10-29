@@ -7,7 +7,7 @@ refuse that rate are reopened at their own, and the encoder resamples afterwards
 
 import os
 import threading
-import time
+import uuid
 
 import numpy as np
 import pyaudiowpatch as pyaudio
@@ -52,11 +52,13 @@ class WasapiBackend(CaptureBackend):
                 continue
             if not loopback and info["maxInputChannels"] <= 0:
                 continue
-            devices.append(AudioDevice(
-                name=info["name"],
-                sample_rate=int(info["defaultSampleRate"]),
-                channels=int(info["maxInputChannels"]),
-            ))
+            devices.append(
+                AudioDevice(
+                    name=info["name"],
+                    sample_rate=int(info["defaultSampleRate"]),
+                    channels=int(info["maxInputChannels"]),
+                )
+            )
         return devices
 
     def list_system_sources(self):
@@ -99,12 +101,21 @@ class WasapiBackend(CaptureBackend):
         except OSError as err:
             raise CaptureError("No microphone available.") from err
 
+    def resolve_sources(self, system_source, mic_source):
+        microphone = self._resolve_mic(mic_source)["name"]
+        system = (
+            self._resolve_loopback(system_source)["name"].replace(" [Loopback]", "")
+            if system_source != SYSTEM_SOURCE_NONE
+            else None
+        )
+        return system, microphone
+
     def start(self, tmp_dir, system_source, mic_source):
         if self._is_recording:
             return
 
         record_system = system_source != SYSTEM_SOURCE_NONE
-        stamp = int(time.time())
+        stamp = uuid.uuid4().hex
         rate = None
 
         if record_system:
@@ -114,8 +125,12 @@ class WasapiBackend(CaptureBackend):
             self._active_system_source = loopback["name"].replace(" [Loopback]", "")
             self._system_path = os.path.join(tmp_dir, f"_rec_system_{stamp}.wav")
             self._system_writer = sf.SoundFile(
-                self._system_path, mode="w", samplerate=rate,
-                channels=self._system_channels, format="WAV", subtype="FLOAT",
+                self._system_path,
+                mode="w",
+                samplerate=rate,
+                channels=self._system_channels,
+                format="WAV",
+                subtype="FLOAT",
             )
             self._prepare_tap(rate)
         else:
@@ -127,9 +142,14 @@ class WasapiBackend(CaptureBackend):
         mic_rate = rate or int(mic_info["defaultSampleRate"])
         self._mic_path = os.path.join(tmp_dir, f"_rec_mic_{stamp}.wav")
         self._mic_writer = sf.SoundFile(
-            self._mic_path, mode="w", samplerate=mic_rate,
-            channels=1, format="WAV", subtype="FLOAT",
+            self._mic_path,
+            mode="w",
+            samplerate=mic_rate,
+            channels=1,
+            format="WAV",
+            subtype="FLOAT",
         )
+        self._prepare_mic_tap(mic_rate)
 
         try:
             if record_system:
@@ -155,8 +175,12 @@ class WasapiBackend(CaptureBackend):
     def _open_mic(self, mic_info, mic_rate):
         try:
             self._mic_stream = self._pa.open(
-                format=pyaudio.paFloat32, channels=1, rate=mic_rate, input=True,
-                input_device_index=mic_info["index"], frames_per_buffer=CHUNK_SIZE,
+                format=pyaudio.paFloat32,
+                channels=1,
+                rate=mic_rate,
+                input=True,
+                input_device_index=mic_info["index"],
+                frames_per_buffer=CHUNK_SIZE,
                 stream_callback=self._mic_callback,
             )
             return
@@ -169,14 +193,23 @@ class WasapiBackend(CaptureBackend):
         # let the encoder resample when the two tracks are mixed.
         self._mic_writer.close()
         self._mic_writer = sf.SoundFile(
-            self._mic_path, mode="w", samplerate=native_rate,
-            channels=1, format="WAV", subtype="FLOAT",
+            self._mic_path,
+            mode="w",
+            samplerate=native_rate,
+            channels=1,
+            format="WAV",
+            subtype="FLOAT",
         )
         self._mic_stream = self._pa.open(
-            format=pyaudio.paFloat32, channels=1, rate=native_rate, input=True,
-            input_device_index=mic_info["index"], frames_per_buffer=CHUNK_SIZE,
+            format=pyaudio.paFloat32,
+            channels=1,
+            rate=native_rate,
+            input=True,
+            input_device_index=mic_info["index"],
+            frames_per_buffer=CHUNK_SIZE,
             stream_callback=self._mic_callback,
         )
+        self._prepare_mic_tap(native_rate)
 
     def _discard_partial_start(self):
         for stream in (self._system_stream, self._mic_stream):
@@ -190,9 +223,7 @@ class WasapiBackend(CaptureBackend):
 
     def _system_callback(self, in_data, frame_count, time_info, status):
         data = np.frombuffer(in_data, dtype=np.float32).reshape(-1, self._system_channels)
-        with self._lock:
-            if self._system_writer and not self._system_writer.closed:
-                self._system_writer.write(data)
+        self._write_samples("system", data)
         if self._system_level_callback:
             self._system_level_callback(rms_level(data))
         self._feed_tap(data)
@@ -202,18 +233,15 @@ class WasapiBackend(CaptureBackend):
         data = np.frombuffer(in_data, dtype=np.float32).reshape(-1, 1)
         if self._mic_muted:
             data = np.zeros_like(data)
-        with self._lock:
-            if self._mic_writer and not self._mic_writer.closed:
-                self._mic_writer.write(data)
+        self._write_samples("mic", data)
         if self._mic_level_callback:
             self._mic_level_callback(rms_level(data))
+        self._feed_mic_tap(data)
         return (None, pyaudio.paContinue)
 
     def stop(self):
         if not self._is_recording:
             return None, None
-        self._is_recording = False
-
         for attr in ("_system_stream", "_mic_stream"):
             stream = getattr(self, attr)
             if stream is not None:
@@ -227,6 +255,7 @@ class WasapiBackend(CaptureBackend):
                 if writer is not None and not writer.closed:
                     writer.close()
 
+        self._is_recording = False
         return self._system_path, self._mic_path
 
     def close(self):
