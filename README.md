@@ -227,11 +227,13 @@ meeting detection, live speakers, and recoverable queued transcription. Upstream
 and release notes appear in the version indicator; source runs keep update checks off.
 Packaged builds check after 45 seconds and then every two hours.
 
-Packaged custom builds only notify about upstream releases on every platform. They never
+Locally packaged builds default to custom and only notify about upstream releases on every platform. They never
 download or install upstream binaries automatically, because those binaries omit our
-custom features. Synchronize by checkpointing local work, merging origin/main in an
-integration worktree, running the combined tests and packaging checks, and building a
-new custom release. Install it with the previous app and settings backed up.
+custom features. The upstream release workflow explicitly marks its official packages;
+those retain automatic updates on Windows and the Linux AppImage, while macOS and unpacked
+Linux packages notify only. Source runs do not check for updates. An official build can be
+reproduced locally by setting `MEETING_RECORDER_BUILD_CHANNEL=official` at build time; do
+this only when its code is intended to be replaced by official upstream releases.
 
 
 ## Set it up

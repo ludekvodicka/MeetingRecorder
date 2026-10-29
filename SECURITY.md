@@ -30,13 +30,10 @@ Worth knowing when judging the impact of a finding:
   run. That is the same trust model as typing `claude` in a terminal.
 - **The summary prompt is a setting**, so a user who edits their own settings file changes what
   the local Claude CLI is asked to do. It is not reachable by anything outside the machine.
-- **Update notices** ask the GitHub Releases API, without credentials, for this repository's
-  latest release 45 seconds after start and every two hours in a packaged build. Source runs
-  keep checks off. Release notes are shown as plain text. This custom branch never downloads
-  or installs stock upstream binaries automatically on any platform: they omit our features.
-  Updates are integrated through a reviewed merge, tested and packaged as a new custom build.
-- **Shared updater code** retains upstream's download/checksum/helper implementation and tests,
-  but the custom application selects notification-only mode. SHA-256 checksums detect corrupt
+- **Updates** check GitHub Releases without credentials in packaged builds. Local custom builds
+  default to notification-only; the upstream release workflow marks official packages at build
+  time. Official Windows and Linux AppImage packages retain automatic updates, while macOS and
+  unpacked Linux builds notify only. Source runs keep checks off. SHA-256 checksums detect corrupt
   downloads; they do not authenticate a release when supplied by that same release.
 
 ## Builds are unsigned

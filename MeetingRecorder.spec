@@ -22,6 +22,11 @@ datas = [
     (str(ASSETS), "audiorecorder/assets"),
     (str(BROWSER_EXTENSION), "browser-extension"),
 ]
+# Local builds fail safe as custom. Only an explicitly marked official release bundles
+# this marker; runtime environment variables cannot change the packaged update policy.
+if os.environ.get("MEETING_RECORDER_BUILD_CHANNEL") == "official":
+    datas.append((str(Path(SPECPATH) / "packaging" / "official" / "build-channel.txt"),
+                  "audiorecorder"))
 binaries = []
 # WASAPI loopback is a Windows-only dependency, and PyInstaller must not look for it
 # anywhere else.

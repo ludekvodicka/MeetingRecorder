@@ -82,6 +82,8 @@ jobs:
         run: python scripts/build.py package
         env:
           QT_QPA_PLATFORM: offscreen
+          # Fork workflows must not produce packages that replace themselves with upstream.
+          MEETING_RECORDER_BUILD_CHANNEL: ${{ github.repository == 'ludekvodicka/MeetingRecorder' && 'official' || 'custom' }}
 
       # The new build is the program that installs itself, so the real artifact has to swap
       # a scratch copy in helper mode before it is released. macOS builds do not self-install.

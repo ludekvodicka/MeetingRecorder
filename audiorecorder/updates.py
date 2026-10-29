@@ -37,6 +37,21 @@ from audiorecorder.shared.desktop.autoupdate.view import UpdateView, UpdateViewM
 from audiorecorder.version import __version__
 
 
+def is_official_build() -> bool:
+    """Only an explicitly marked frozen release may install upstream binaries."""
+    if not getattr(sys, "frozen", False):
+        return False
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if not bundle_root:
+        return False
+    try:
+        return (Path(bundle_root) / "audiorecorder" / "build-channel.txt").read_text(
+            encoding="utf-8"
+        ).strip() == "official"
+    except (OSError, UnicodeError):
+        return False
+
+
 class QtUpdateHost(QObject):
     """The member's UpdateHost on the Qt event loop of the thread that creates it."""
 
@@ -109,7 +124,7 @@ class AppUpdates(QObject):
         transport = UpdateTransport(f"MeetingRecorder/{__version__}", context)
         facts = UpdateRuntimeFacts(getattr(sys, "frozen", False), sys.platform, target)
         resolution = UpdateRuntime.resolve(facts, UpdateRuntime.writable)
-        if resolution.mode != "off":
+        if resolution.mode != "off" and not is_official_build():
             # Stock binaries omit this branch's capture/lifecycle/transcription fixes.
             # Still show release notes, but never replace a custom build with one.
             resolution = UpdateResolution(

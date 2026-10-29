@@ -45,3 +45,12 @@ def test_release_build_tools_are_versioned_and_verified_before_execution():
     assert '$RUNNER_TEMP/appimagetool-x86_64.AppImage' in workflow
     assert 'APPIMAGETOOL=$tool' in workflow
     assert 'APPIMAGE_RUNTIME_FILE=$runtime' in workflow
+
+
+def test_only_upstream_release_workflow_marks_packages_official():
+    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    spec = (ROOT / "MeetingRecorder.spec").read_text(encoding="utf-8")
+    assert "github.repository == 'ludekvodicka/MeetingRecorder'" in workflow
+    assert "MEETING_RECORDER_BUILD_CHANNEL" in workflow
+    assert 'os.environ.get("MEETING_RECORDER_BUILD_CHANNEL") == "official"' in spec
+    assert (ROOT / "packaging" / "official" / "build-channel.txt").read_text().strip() == "official"

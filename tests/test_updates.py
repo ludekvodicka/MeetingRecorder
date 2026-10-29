@@ -295,3 +295,44 @@ def test_custom_packaged_builds_only_notify(platform, app, tmp_path, monkeypatch
     assert not list(tmp_path.glob('**/pending.json'))
     assert not list(tmp_path.glob('**/*.part'))
     updates.quit(False)
+
+
+@pytest.mark.parametrize(
+    ("platform", "official", "expected"),
+    [("win32", True, "automatic"), ("linux", True, "automatic"),
+     ("darwin", True, "notify"), ("win32", False, "notify"),
+     ("linux", False, "notify")],
+)
+def test_build_identity_selects_update_policy(
+    platform, official, expected, app, tmp_path, monkeypatch
+):
+    from audiorecorder import updates as module
+
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(module.sys, "platform", platform)
+    monkeypatch.setattr(module.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(UpdateRuntime, "writable", staticmethod(lambda path: True))
+    monkeypatch.setattr(AppUpdates, "target", staticmethod(lambda: (
+        None if platform == "darwin" else
+        UpdateTargetFile(tmp_path / "app", FILE_PATTERN, onefile_parent=False)
+    )))
+    if official:
+        marker = tmp_path / "audiorecorder" / "build-channel.txt"
+        marker.parent.mkdir()
+        marker.write_text("official\n", encoding="utf-8")
+    updates = AppUpdates.create(app)
+    assert updates._manager.status.mode == expected
+    updates.quit(False)
+
+
+def test_missing_or_invalid_build_marker_fails_safe(tmp_path, monkeypatch):
+    from audiorecorder import updates as module
+
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(module.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setenv("MEETING_RECORDER_BUILD_CHANNEL", "official")
+    assert not module.is_official_build()
+    marker = tmp_path / "audiorecorder" / "build-channel.txt"
+    marker.parent.mkdir()
+    marker.write_text("custom", encoding="utf-8")
+    assert not module.is_official_build()
