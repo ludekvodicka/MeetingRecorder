@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import QApplication
 from audiorecorder.config import load_config, save_config
 from audiorecorder.single_instance import SingleInstance
 from audiorecorder.ui.main_window import MainWindow
+from audiorecorder.ui.update_indicator import UpdateIndicator
+from audiorecorder.updates import AppUpdates
 
 
 def asset_path(name):
@@ -126,7 +128,13 @@ def main():
     cfg = load_config()
     os.makedirs(cfg["output_dir"], exist_ok=True)
     save_config(cfg)
+    updates = AppUpdates.create(app)
     window = MainWindow(cfg, notifications)
+    updates.set_busy_check(window.busy_reason)
+    window.statusBar().addPermanentWidget(UpdateIndicator(updates, window))
+    session_ending = []
+    app.commitDataRequest.connect(lambda _manager: session_ending.append(True))
+    app.aboutToQuit.connect(lambda: updates.quit(bool(session_ending)))
     quit_filter = QuitFilter(window)
     app.installEventFilter(quit_filter)
     app.aboutToQuit.connect(instance.close)
@@ -136,6 +144,7 @@ def main():
         if not launch.login:
             _raise(window)
 
+    updates.start()
     launch.on_finish = show_launch
     if launch.finished:
         QTimer.singleShot(0, show_launch)

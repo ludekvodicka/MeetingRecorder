@@ -46,6 +46,10 @@ and say in the release notes what was not exercised.
       dictation used to switch itself off the moment it started
 - [ ] The clipboard content you had before the dictation is back afterwards
 - [ ] Ctrl+Shift+Space dictates and translates instead
+- [ ] With Dictation on, type fast and move the mouse in another application for one
+      minute: typing and mouse movement do not lag
+- [ ] Switch Dictation off and on, then hold Ctrl+Space, speak and release: dictation
+      starts again and the text is pasted where the caret is
 - [ ] Dictate once with the language set to Czech, once to English and once to Auto-detect.
       Auto sends no language hint at all, and a wrong hint makes Soniox reject the stream
 - [ ] Tap Ctrl+Space instead of holding it: the status bar says it was too short
@@ -72,6 +76,13 @@ and say in the release notes what was not exercised.
 - [ ] Clear the API key from the keyring, restart, and confirm Transcribe explains what to do
       rather than failing obscurely
 - [ ] Enter the key in Settings, confirm it is accepted and survives a restart
+- [ ] Self-update: copy the previous release's `.exe` into a writable folder and start it. About
+      45 seconds later the status bar shows the new version downloading, then ready
+- [ ] The Update dialog shows the new release notes as text; View on GitHub opens the release page
+- [ ] Restart and install (or quit normally): the same file name now holds the new version, its
+      SHA-256 matches the line in the new `SHA256SUMS.txt`, the title shows the new version, and
+      `updates/result.json` in the cache folder says installed
+- [ ] Start a recording, then Restart and install: the dialog refuses and names the recording
 
 ### macOS
 
@@ -143,3 +154,15 @@ The two backends have to stay interchangeable, so run these on every platform yo
 - [ ] Both meters move independently
 - [ ] The temporary `_rec_system_*.wav` and `_rec_mic_*.wav` files are gone after encoding
 - [ ] A recording that is stopped immediately still produces a valid file
+
+## Custom build update policy
+
+- [ ] In a packaged custom build, a newer upstream release shows notes and a release link,
+  without a download or Restart and install action, on every platform.
+- [ ] Preserve native macOS capture, meeting/calendar/browser detection and transcription
+  queue/recovery when integrating origin/main. Run the combined root and shared test suites.
+- [ ] Check source-run updates stay off; real capture/transcription acceptance is separate
+  from the mocked provider and updater tests.
+
+The automatic updater scenarios above describe the retained upstream library. Our custom
+application selects notification-only mode so stock binaries cannot replace our features.

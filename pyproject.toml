@@ -36,11 +36,12 @@ dependencies = [
     "soundfile>=0.12",
     "av>=12.0",
     "requests>=2.31",
+    "certifi>=2026.10.19",
     "sounddevice>=0.4",
     "websocket-client>=1.6",
     "pyperclip>=1.8",
-    # Global push-to-talk needs the key release as well as the press, on all three
-    # platforms. The keyboard package only delivers that on Windows.
+    # pynput listens for push-to-talk on macOS and Linux and sends paste on every
+    # platform. Windows listens through Raw Input.
     "pynput>=1.7",
     "keyring>=24",
     "platformdirs>=4",
@@ -63,7 +64,7 @@ dependencies = [
 dev = [
     "ruff>=0.6",
     "pytest>=8.0",
-    "pyinstaller>=6.0",
+    "pyinstaller>=6.10",
 ]
 
 [project.urls]
@@ -86,7 +87,7 @@ include = ["audiorecorder*"]
 audiorecorder = ["assets/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "audiorecorder/shared"]
 
 [tool.ruff]
 line-length = 100

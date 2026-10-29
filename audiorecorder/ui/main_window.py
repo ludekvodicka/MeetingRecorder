@@ -2,7 +2,6 @@ import logging
 import os
 import shutil
 import sys
-import threading
 import time
 from collections import deque
 
@@ -23,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from audiorecorder import secrets, update_check
+from audiorecorder import secrets
 from audiorecorder.audio.encoder import mix_and_encode
 from audiorecorder.audio.runtime import capture_runtime
 from audiorecorder.audio.session import CaptureSession
@@ -155,7 +154,6 @@ class MainWindow(QMainWindow):
     _system_level_signal = pyqtSignal(float)
     _mic_level_signal = pyqtSignal(float)
     _capture_error_signal = pyqtSignal(str, str)
-    _update_available_signal = pyqtSignal(str)
 
     def __init__(self, config, notifications=None):
         super().__init__()
@@ -221,8 +219,6 @@ class MainWindow(QMainWindow):
         self._system_level_signal.connect(self._level_bars.set_system_level)
         self._mic_level_signal.connect(self._level_bars.set_mic_level)
         self._capture_error_signal.connect(self._on_capture_error)
-        self._update_available_signal.connect(self._on_update_available)
-        self._start_update_check()
         self._meeting_timer = QTimer(self)
         self._meeting_timer.setInterval(5000)
         self._meeting_timer.timeout.connect(self._poll_for_meeting)
@@ -258,21 +254,6 @@ class MainWindow(QMainWindow):
     def _quit_from_tray(self):
         self._quitting = True
         self.close()
-
-    def _start_update_check(self):
-        """Ask GitHub for a newer release, off the UI thread, failing silently."""
-
-        def check():
-            latest = update_check.fetch_latest_version()
-            if latest and update_check.is_newer(latest, __version__):
-                self._update_available_signal.emit(latest)
-
-        threading.Thread(target=check, daemon=True).start()
-
-    def _on_update_available(self, latest):
-        self._status_bar.showMessage(
-            f"Version {latest} is available at {update_check.RELEASES_PAGE}", 15000
-        )
 
     def _sync_meeting_detection(self):
         if hasattr(self, "_lifecycle"):
@@ -339,6 +320,20 @@ class MainWindow(QMainWindow):
         prompt = self._meeting_prompt
         if prompt is not None:
             self._lifecycle._manual_candidate(prompt.candidate.key)
+
+    def busy_reason(self):
+        """Include custom lifecycle and queued work before any update-related quit."""
+        if self._quitting:
+            return "the application is closing."
+        if self._is_recording or self._lifecycle.controller.state != "idle":
+            return "a recording is active or its lifecycle is changing."
+        if self._active_encoders or self._encoder_queue:
+            return "a recording is still being saved."
+        if self._busy_paths or self._processing.is_running():
+            return "a transcription or cleanup is queued or running."
+        if self._dictation_active:
+            return "dictation is on."
+        return None
 
     def _build_ui(self):
         central = QWidget()
@@ -474,10 +469,6 @@ class MainWindow(QMainWindow):
             "The browser companion sends a local heartbeat when it is installed and enabled."
         )
         self._status_bar.addPermanentWidget(self._browser_status_label)
-        # Permanent (right-aligned) version label, not cleared by transient messages.
-        version_label = QLabel(f"v{__version__}")
-        version_label.setStyleSheet("color: #888; padding: 0 6px;")
-        self._status_bar.addPermanentWidget(version_label)
 
         # --- Timer ---
         self._timer = QTimer(self)

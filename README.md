@@ -200,9 +200,9 @@ Unless a release explicitly says it is notarized, its builds are unsigned. Check
 of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Meeting-Recorder-0.2.0-x64.exe                    # Linux or Git Bash
-shasum -a 256 Meeting-Recorder-0.2.0-arm64.dmg              # macOS
-certutil -hashfile Meeting-Recorder-0.2.0-x64.exe SHA256    # Windows Command Prompt
+sha256sum Meeting-Recorder-0.3.3-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.3.3-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.3.3-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
@@ -216,8 +216,19 @@ certutil -hashfile Meeting-Recorder-0.2.0-x64.exe SHA256    # Windows Command Pr
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 
-The application does not update itself. It checks the Releases page once at startup and tells
-you in the status bar when something newer exists.
+## Updates
+
+This custom branch incorporates origin/main v0.3.3 while retaining native macOS capture,
+meeting detection, live speakers, and recoverable queued transcription. Upstream checks
+and release notes appear in the version indicator; source runs keep update checks off.
+Packaged builds check after 45 seconds and then every two hours.
+
+Packaged custom builds only notify about upstream releases on every platform. They never
+download or install upstream binaries automatically, because those binaries omit our
+custom features. Synchronize by checkpointing local work, merging origin/main in an
+integration worktree, running the combined tests and packaging checks, and building a
+new custom release. Install it with the previous app and settings backed up.
+
 
 ## Set it up
 

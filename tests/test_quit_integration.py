@@ -30,7 +30,6 @@ def test_quit_during_start_reconciles_late_success_and_releases_capture(tmp_path
         app = QApplication([])
         app.setQuitOnLastWindowClosed(False)
         mw.CaptureSession = lambda: CaptureSession(Backend)
-        mw.MainWindow._start_update_check = lambda self: None
         window = mw.MainWindow({'output_dir': sys.argv[1], 'meeting_detection': False})
         quit_filter = QuitFilter(window)
         app.installEventFilter(quit_filter)

@@ -1,11 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Meeting Recorder Companion",
-  "version": "0.2.0",
+  "version": "0.3.3",
   "minimum_chrome_version": "120",
   "description": "Offers Meeting Recorder when a supported browser meeting opens.",
-  "permissions": ["alarms"],
-  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "permissions": [
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -17,7 +21,9 @@
         "https://teams.microsoft.com/*",
         "https://teams.cloud.microsoft/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

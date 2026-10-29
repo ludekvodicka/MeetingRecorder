@@ -30,10 +30,17 @@ Worth knowing when judging the impact of a finding:
   can therefore have it run. That is the same trust model as typing `claude` in a terminal.
 - **The summary prompt is a setting**, so a user who edits their own settings file changes what
   the local Claude CLI is asked to do. It is not reachable by anything outside the machine.
-- **The update check** performs one unauthenticated GET against the GitHub Releases API at
-  startup and only ever displays a version string. It never downloads or executes anything.
+- **Update notices** ask the GitHub Releases API, without credentials, for this repository's
+  latest release 45 seconds after start and every two hours in a packaged build. Source runs
+  keep checks off. Release notes are shown as plain text. This custom branch never downloads
+  or installs stock upstream binaries automatically on any platform: they omit our features.
+  Updates are integrated through a reviewed merge, tested and packaged as a new custom build.
+- **Shared updater code** retains upstream's download/checksum/helper implementation and tests,
+  but the custom application selects notification-only mode. SHA-256 checksums detect corrupt
+  downloads; they do not authenticate a release when supplied by that same release.
 
 ## Builds are unsigned
 
-Releases carry no code signature on any platform. Verify the SHA256 published with each release
-before running a download. Signing is a known gap, not an oversight.
+Official upstream releases are unsigned. Our custom macOS packages are ad-hoc signed for
+local integrity, without Developer ID or notarization. Verify the checksum of a package before
+installing it; ad-hoc signing does not establish a trusted publisher.

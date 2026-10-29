@@ -5,4 +5,4 @@ metadata, `pyproject.toml` reads it as the dynamic project version, and the rele
 compares every copy against the git tag.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.3"
