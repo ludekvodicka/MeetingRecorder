@@ -47,9 +47,10 @@ DEFAULTS = {
     # Live speaker labels open two additional realtime streams (system + microphone), so
     # they are explicit opt-in just like translated subtitles.
     "live_speakers": False,
-    # A conservative, local-only signal offers the Record button when a meeting window is
-    # stable. It never records automatically and is safe to enable by default.
-    "meeting_detection": True,
+    # A local-only signal offers the Record button when a meeting window is stable. It
+    # never records automatically, but it opens the loopback browser bridge, so it is
+    # opt-in like every other listener.
+    "meeting_detection": False,
     # Calendar access is a separate, sensitive permission and remains opt-in.
     "calendar_detection": False,
     # Automatic start is deliberately separate from detection and always has a visible

@@ -84,10 +84,12 @@ class RecordingManager:
         recording = Path(recording_path)
         if not recording.parent.exists():
             return
-        with TranscriptionJob(recording).locked():
+        job = TranscriptionJob(recording)
+        with job.locked():
             recording.unlink(missing_ok=True)
             for sidecar in sidecars(recording):
                 sidecar.unlink()
+        job.discard_lock()
 
     def rename(self, recording_path, new_name):
         recording = Path(recording_path)
@@ -133,4 +135,6 @@ class RecordingManager:
                     raise RuntimeError(
                         f"Move failed; files still need recovery: {', '.join(failures)}") from error
                 raise
+        for path in (recording, target):
+            TranscriptionJob(path).discard_lock()
         return str(target)

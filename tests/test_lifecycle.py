@@ -13,7 +13,10 @@ class Clock:
 @pytest.fixture
 def run():
     clock = Clock()
-    policy = Lifecycle({"automatic_recording": True, "auto_stop_recording": True}, clock)
+    policy = Lifecycle(
+        {"meeting_detection": True, "automatic_recording": True, "auto_stop_recording": True},
+        clock,
+    )
     return policy, clock
 
 

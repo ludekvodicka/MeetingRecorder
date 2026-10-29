@@ -207,3 +207,32 @@ def test_published_transcript_is_success_even_if_final_status_write_fails(
     assert worker.results == [str(audio.with_suffix('.md'))]
     assert calls == ['upload', 'submit']
     assert audio.with_suffix('.md').read_text()
+
+
+def test_completed_transcription_removes_its_lock_but_a_failed_one_keeps_it(
+    setup_worker, monkeypatch,
+):
+    audio, calls, make = setup_worker
+    lock = audio.with_suffix('.transcription.lock')
+    with monkeypatch.context() as patch:
+        patch.setattr(SonioxClient, 'poll_status',
+                      lambda self, job: (_ for _ in ()).throw(TimeoutError('offline')))
+        make().run()
+    assert lock.exists()
+    make().run()
+    assert audio.with_suffix('.md').exists()
+    assert not lock.exists()
+
+
+def test_publication_without_hard_links_preserves_existing_file(tmp_path, monkeypatch):
+    from audiorecorder import atomic_files
+
+    monkeypatch.setattr(
+        atomic_files.os, 'link', lambda *args: (_ for _ in ()).throw(OSError('no links')))
+    path = tmp_path / 'meeting.md'
+    atomic_write(path, 'new', replace=False)
+    assert path.read_text() == 'new'
+    with pytest.raises(FileExistsError):
+        atomic_write(path, 'other', replace=False)
+    assert path.read_text() == 'new'
+    assert not list(tmp_path.glob('.transcript-*'))

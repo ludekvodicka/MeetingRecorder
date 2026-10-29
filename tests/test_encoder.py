@@ -233,3 +233,19 @@ def test_multi_hour_sources_allocate_only_bounded_mix_blocks():
         assert peak < 4_000_000
     finally:
         tracemalloc.stop()
+
+
+def test_publication_without_hard_links_produces_the_recording(tmp_path, monkeypatch):
+    """FAT32, exFAT and some network shares refuse os.link."""
+    from audiorecorder import atomic_files
+    from audiorecorder.audio import encoder
+
+    monkeypatch.setattr(
+        atomic_files.os, "link", lambda *args: (_ for _ in ()).throw(OSError("no links")))
+    mic = write_wav(tmp_path / "mic.wav", tone(0.1))
+    out = tmp_path / "out.m4a"
+    result = mix_and_encode(None, mic, str(out))
+    assert result.cleanup_errors == ()
+    with encoder.av.open(str(out)) as container:
+        assert next(container.decode(audio=0)).samples > 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out.m4a"]

@@ -222,18 +222,15 @@ certutil -hashfile Meeting-Recorder-0.3.3-x64.exe SHA256    # Windows Command Pr
 
 ## Updates
 
-This custom branch incorporates origin/main v0.3.3 while retaining native macOS capture,
-meeting detection, live speakers, and recoverable queued transcription. Upstream checks
-and release notes appear in the version indicator; source runs keep update checks off.
-Packaged builds check after 45 seconds and then every two hours.
+Packaged builds check GitHub Releases 45 seconds after start and then every two hours; the
+version indicator shows the result and the release notes. Source runs do not check.
 
-Locally packaged builds default to custom and only notify about upstream releases on every platform. They never
-download or install upstream binaries automatically, because those binaries omit our
-custom features. The upstream release workflow explicitly marks its official packages;
-those retain automatic updates on Windows and the Linux AppImage, while macOS and unpacked
-Linux packages notify only. Source runs do not check for updates. An official build can be
-reproduced locally by setting `MEETING_RECORDER_BUILD_CHANNEL=official` at build time; do
-this only when its code is intended to be replaced by official upstream releases.
+The release workflow marks the packages it publishes as official. Official Windows and Linux
+AppImage packages download, verify and install a new release themselves; macOS and the
+unpacked Linux package only notify. A package you build yourself, or one built in a fork, is
+not official and only notifies, so an official release never silently replaces your own
+changes. Set `MEETING_RECORDER_BUILD_CHANNEL=official` at build time only when official
+releases should replace that build.
 
 
 ## Set it up

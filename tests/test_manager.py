@@ -208,3 +208,14 @@ def test_transfer_cannot_overwrite_destination_with_active_transcription(tmp_pat
     assert source.exists()
     assert source.with_suffix('.md').exists()
     assert not target.exists()
+
+
+def test_delete_and_rename_leave_no_lock_files(tmp_path):
+    make_recording(tmp_path, "kept", transcript=True)
+    make_recording(tmp_path, "gone", transcript=True)
+    manager = RecordingManager(str(tmp_path))
+
+    manager.rename(str(tmp_path / "kept.m4a"), "renamed")
+    manager.delete(str(tmp_path / "gone.m4a"))
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["renamed.m4a", "renamed.md"]

@@ -187,6 +187,7 @@ class MainWindow(QMainWindow):
         self._speaker_segments = []
         self._pending_sidecars = {}
         self._quitting = False
+        self._exit_ready = False
         self._tray_icon = None
         self._browser_meeting_bridge = BrowserMeetingBridge()
         self._calendar_meeting_detector = create_calendar_detector()
@@ -259,7 +260,7 @@ class MainWindow(QMainWindow):
     def _sync_meeting_detection(self):
         if hasattr(self, "_lifecycle"):
             self._lifecycle.configure()
-        if self.config.get("meeting_detection", True) or self._lifecycle.native.testing:
+        if self.config.get("meeting_detection", False) or self._lifecycle.native.testing:
             if not self._browser_meeting_bridge.start():
                 self._status_bar.showMessage(
                     "Browser meeting detection unavailable: localhost port 8765 is busy",
@@ -279,7 +280,7 @@ class MainWindow(QMainWindow):
         self._update_browser_status()
 
     def _update_browser_status(self):
-        if not self.config.get("meeting_detection", True):
+        if not self.config.get("meeting_detection", False):
             text = "Browser: detection off"
         else:
             status = self._browser_meeting_bridge.companion_status()
@@ -324,7 +325,9 @@ class MainWindow(QMainWindow):
 
     def busy_reason(self):
         """Include custom lifecycle and queued work before any update-related quit."""
-        if self._quitting:
+        # closeEvent sets _exit_ready only after all work has stopped. aboutToQuit runs
+        # after that, and a ready update must still install on that normal quit.
+        if self._quitting and not self._exit_ready:
             return "the application is closing."
         if self._is_recording or self._lifecycle.controller.state != "idle":
             return "a recording is active or its lifecycle is changing."
@@ -332,8 +335,7 @@ class MainWindow(QMainWindow):
             return "a recording is still being saved."
         if self._busy_paths or self._processing.is_running():
             return "a transcription or cleanup is queued or running."
-        if self._dictation_active:
-            return "dictation is on."
+        # Dictation stays on all day for some users; it holds no unsaved work, so it never blocks.
         return None
 
     def _build_ui(self):

@@ -3,8 +3,10 @@
 import json
 import os
 import tempfile
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
+
+from audiorecorder.atomic_files import publish_new
 
 
 def atomic_write(path, text, *, replace=True):
@@ -18,8 +20,8 @@ def atomic_write(path, text, *, replace=True):
         if replace:
             os.replace(temporary, path)
         else:
-            # Atomic publication without overwriting a transcript produced elsewhere.
-            os.link(temporary, path)
+            # Publication without overwriting a transcript produced elsewhere.
+            publish_new(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -32,8 +34,9 @@ class TranscriptionJob:
 
     @contextmanager
     def locked(self):
-        # Never unlink this inode: unlinking an advisory lock allows a third process
-        # to lock a replacement file while another process still owns the original.
+        # Never unlink this inode while work depends on it: unlinking an advisory lock
+        # allows a third process to lock a replacement file while another process still
+        # owns the original. discard_lock() runs only once that work is final.
         if self.audio.with_suffix('.md.transcribing').exists():
             raise RuntimeError(
                 'A legacy CLI lock exists. Check that the old job has stopped before removing it.')
@@ -65,6 +68,16 @@ class TranscriptionJob:
                     msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
                 else:
                     fcntl.flock(stream, fcntl.LOCK_UN)
+
+    def discard_lock(self):
+        """Remove the lock file after the recording was deleted, moved or transcribed.
+
+        A process still holding the old inode then finds no recording or an existing
+        transcript, so it has nothing left to do. A lock another process holds open on
+        Windows cannot be removed and stays until the next discard.
+        """
+        with suppress(OSError):
+            self.lock_path.unlink(missing_ok=True)
 
     def load(self, options):
         stat = self.audio.stat()

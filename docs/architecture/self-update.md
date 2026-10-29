@@ -1,13 +1,13 @@
 # Self-update
 
-## Custom branch policy
+## Official and self-built packages
 
-This branch keeps the shared updater and its tests, but AppUpdates converts every packaged
-runtime to notification-only mode. Source runs remain off. Upstream binaries lack our
-native macOS capture, meeting lifecycle and recoverable transcription, so automatically
-installing them would drop features. Update the custom build through a tested merge of
-origin/main and a fresh package. The automatic behavior described below is the upstream
-implementation retained in the shared library, not the policy of our packaged app.
+Only an official package installs updates itself. The release workflow sets
+`MEETING_RECORDER_BUILD_CHANNEL=official` for this repository, and `MeetingRecorder.spec` then
+bundles `packaging/official/build-channel.txt`. `AppUpdates.create` reads that marker from the
+bundle; without it every packaged runtime is notification-only. A self-built or fork package
+may carry changes an official release lacks, so the release must not replace it unasked. An
+environment variable at runtime cannot change this, because the marker is part of the bundle.
 
 ## Decision
 

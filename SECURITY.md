@@ -30,14 +30,18 @@ Worth knowing when judging the impact of a finding:
   run. That is the same trust model as typing `claude` in a terminal.
 - **The summary prompt is a setting**, so a user who edits their own settings file changes what
   the local Claude CLI is asked to do. It is not reachable by anything outside the machine.
-- **Updates** check GitHub Releases without credentials in packaged builds. Local custom builds
-  default to notification-only; the upstream release workflow marks official packages at build
-  time. Official Windows and Linux AppImage packages retain automatic updates, while macOS and
-  unpacked Linux builds notify only. Source runs keep checks off. SHA-256 checksums detect corrupt
-  downloads; they do not authenticate a release when supplied by that same release.
+- **Updates** check GitHub Releases without credentials in packaged builds. Self-built and fork
+  packages only notify; the release workflow marks official packages at build time. Official
+  Windows and Linux AppImage packages install updates themselves, while macOS and unpacked Linux
+  builds notify only. Source runs keep checks off. SHA-256 checksums detect corrupt downloads;
+  they do not authenticate a release when supplied by that same release.
+- **Meeting detection is opt-in.** When it is on, the application listens on `127.0.0.1:8765`
+  for the browser companion, without a token. Any local process can therefore show a meeting
+  prompt, but none can start a recording: that needs the user's click.
 
 ## Builds are unsigned
 
-Official upstream releases are unsigned. Our custom macOS packages are ad-hoc signed for
-local integrity, without Developer ID or notarization. Verify the checksum of a package before
-installing it; ad-hoc signing does not establish a trusted publisher.
+Windows and Linux releases carry no code signature. macOS packages are ad-hoc signed for local
+integrity, without Developer ID or notarization, unless `MACOS_CODESIGN_IDENTITY` is set at build
+time. Verify the checksum of a package before installing it; ad-hoc signing does not establish a
+trusted publisher.

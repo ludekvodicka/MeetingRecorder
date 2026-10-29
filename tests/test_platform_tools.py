@@ -8,7 +8,7 @@ def test_macos_desktop_searches_shell_homebrew_and_user_locations(tmp_path):
     path = executable_search_path(
         "darwin",
         home=tmp_path,
-        environment={"PATH": "/custom/bin:/usr/bin"},
+        environment={"PATH": os.pathsep.join(["/custom/bin", "/usr/bin"])},
     ).split(os.pathsep)
 
     assert path[:2] == ["/custom/bin", "/usr/bin"]
@@ -19,13 +19,13 @@ def test_macos_desktop_searches_shell_homebrew_and_user_locations(tmp_path):
 
 
 def test_non_macos_search_path_is_not_modified():
-    assert executable_search_path(
-        "linux", environment={"PATH": "/custom/bin:/usr/bin"}
-    ) == "/custom/bin:/usr/bin"
+    inherited = os.pathsep.join(["/custom/bin", "/usr/bin"])
+    assert executable_search_path("linux", environment={"PATH": inherited}) == inherited
 
 
 def test_find_executable_locates_a_user_installed_tool(tmp_path):
-    binary = tmp_path / ".local" / "bin" / "claude"
+    # Windows finds executables by PATHEXT, not by the executable bit.
+    binary = tmp_path / ".local" / "bin" / ("claude.exe" if os.name == "nt" else "claude")
     binary.parent.mkdir(parents=True)
     binary.write_text("#!/bin/sh\n", encoding="utf-8")
     binary.chmod(0o755)
@@ -37,7 +37,7 @@ def test_find_executable_locates_a_user_installed_tool(tmp_path):
         environment={"PATH": "/usr/bin"},
     )
 
-    assert found == str(binary)
+    assert os.path.normcase(found) == os.path.normcase(str(binary))
 
 
 def test_find_executable_returns_none_for_missing_tool(tmp_path):

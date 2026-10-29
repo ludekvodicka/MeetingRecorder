@@ -125,10 +125,10 @@ class AppUpdates(QObject):
         facts = UpdateRuntimeFacts(getattr(sys, "frozen", False), sys.platform, target)
         resolution = UpdateRuntime.resolve(facts, UpdateRuntime.writable)
         if resolution.mode != "off" and not is_official_build():
-            # Stock binaries omit this branch's capture/lifecycle/transcription fixes.
-            # Still show release notes, but never replace a custom build with one.
+            # A self-built or fork package may hold changes the official release lacks.
+            # Still show release notes, but never replace such a build with a release.
             resolution = UpdateResolution(
-                "notify", "Custom build: merge upstream and rebuild to preserve local features.")
+                "notify", "Self-built package: install official releases manually.")
         manager = UpdateManager(
             running=__version__,
             resolution=resolution,

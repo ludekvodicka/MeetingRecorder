@@ -124,3 +124,20 @@ def test_independent_countdown_settings_are_saved(dialog):
     dialog._save_and_close()
     assert dialog.get_config()["auto_start_delay_seconds"] == 7
     assert dialog.get_config()["auto_stop_delay_seconds"] == 19
+
+
+def test_macos_only_controls_are_hidden_on_windows(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings_module, "create_backend", FakeBackend)
+    monkeypatch.setattr(settings_module.secrets, "has_stored_key", lambda: False)
+    monkeypatch.setattr(settings_module.sys, "platform", "win32")
+    built = SettingsDialog({"output_dir": str(tmp_path), "language": "en",
+                            "translation_target": "en"})
+    try:
+        layout = built._automatic_recording.parentWidget().layout()
+        for control in (built._automatic_recording, built._notification_style,
+                        built._start_delay, built._login_status):
+            assert not layout.isRowVisible(control)
+        assert not built._meeting_detection.isHidden()
+        assert not built._meeting_detection.isChecked()
+    finally:
+        built.deleteLater()

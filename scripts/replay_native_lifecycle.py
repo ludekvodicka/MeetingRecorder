@@ -23,7 +23,7 @@ from audiorecorder.meetings.native_profiles import PROFILES  # noqa: E402
 def replay(trace, *, allow_window_absence=False):
     now = 0.0
     policy = Lifecycle(
-        {"automatic_recording": True, "auto_stop_recording": True},
+        {"meeting_detection": True, "automatic_recording": True, "auto_stop_recording": True},
         clock=lambda: now,
         token="replay",
     )

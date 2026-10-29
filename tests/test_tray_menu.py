@@ -117,7 +117,7 @@ def test_opening_menu_refreshes_start_availability(window, blocker):
 
 def test_start_menu_takes_over_an_automatic_countdown_once(window):
     controller = window._lifecycle.controller
-    controller.configure({"automatic_recording": True})
+    controller.configure({"meeting_detection": True, "automatic_recording": True})
     now = [100.0]
     controller.clock = lambda: now[0]
     for timestamp in (100.0, 101.0):

@@ -97,5 +97,6 @@ class TranscriptionService:
                 # Publication is the commit point. Earlier IDs still permit recovery;
                 # a failed status update must not turn a saved transcript into a failure.
                 self.progress("Transcript saved; job status update failed")
+        job.discard_lock()
         self.progress("Done")
         return output_path

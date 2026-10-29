@@ -7,6 +7,8 @@ import av
 import numpy as np
 import soundfile as sf
 
+from audiorecorder.atomic_files import publish_new
+
 
 class NoAudioError(RuntimeError):
     """No frames were captured; inputs are retained for inspection."""
@@ -36,12 +38,14 @@ def mix_and_encode(
         with av.open(staging) as container:
             if not container.streams.audio or next(container.decode(audio=0), None) is None:
                 raise NoAudioError("Encoded recording has no decodable audio")
-        # Atomic publication refuses to overwrite an existing recording.
-        os.link(staging, output_m4a_path)
+        # Publication refuses to overwrite an existing recording.
+        publish_new(staging, output_m4a_path)
         published = True
     finally:
         try:
             os.unlink(staging)
+        except FileNotFoundError:
+            pass
         except OSError as error:
             if published:
                 errors.append(f"{staging}: {error}")

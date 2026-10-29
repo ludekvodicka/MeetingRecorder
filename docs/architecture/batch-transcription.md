@@ -37,9 +37,18 @@ transfer failure rolls back completed file moves while locks remain held. If rol
 fails, the error names the remaining destination paths for recovery. This is not a multi-file
 transaction across a machine crash or filesystem failure.
 
-Permanent `.transcription.lock` inodes remain after moves/deletes. Never unlink an active lock
-or use its mere existence as evidence that a job is running. The kernel releases ownership
-when its process exits. Legacy `.md.transcribing` markers retain their manual-review behavior.
+A `.transcription.lock` file is removed only after the work it protected is final: a delete, a
+completed move, or a published transcript (`TranscriptionJob.discard_lock`). A process that
+still holds the old inode then finds no recording or an existing transcript, so it has nothing
+left to do. A failed transcription keeps its lock file for the retry. Never unlink a lock while
+work depends on it, and never use its mere existence as evidence that a job is running. The
+kernel releases ownership when its process exits. On Windows a lock another process holds open
+cannot be removed and stays until the next discard. Legacy `.md.transcribing` markers retain
+their manual-review behavior.
+
+Final files are published with a hard link, which never overwrites. FAT32, exFAT, cloud drives
+and some network shares have no hard links; there `atomic_files.publish_new` renames instead,
+after checking that the target does not exist.
 
 ## Validation
 

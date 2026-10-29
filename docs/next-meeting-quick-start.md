@@ -22,7 +22,7 @@
 2. Keep **System audio source** and **Microphone** on **Default** unless the level meters show
    the wrong devices.
 3. Add the Soniox API key if you want transcription, live translation, or live speakers.
-4. Keep **Show a recording prompt when a meeting is detected** enabled.
+4. Enable **Show a recording prompt when a meeting is detected**; it is off by default.
 5. Enable **Launch at login and keep meeting detection available** if prompts should work after
    every Mac login. macOS may also show this under **General > Login Items**.
 6. Optionally enable **Use macOS Calendar**. macOS requests Calendar access; this is used only

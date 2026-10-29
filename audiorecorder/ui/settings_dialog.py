@@ -72,7 +72,7 @@ class SettingsDialog(QDialog):
         general_layout.addRow("Output directory:", dir_row)
 
         self._meeting_detection = QCheckBox("Show a recording prompt when a meeting is detected")
-        self._meeting_detection.setChecked(self.config.get("meeting_detection", True))
+        self._meeting_detection.setChecked(self.config.get("meeting_detection", False))
         general_layout.addRow("", self._meeting_detection)
 
         self._calendar_detection = QCheckBox("Use macOS Calendar for scheduled meeting prompts")
@@ -143,6 +143,12 @@ class SettingsDialog(QDialog):
         login_buttons.addWidget(open_login)
         general_layout.addRow("", login_buttons)
         general_layout.addRow("", self._launch_at_login)
+        # Automatic start, native prompts and login items exist only on macOS.
+        for row in (
+            self._automatic_recording, self._auto_stop, self._start_delay, self._stop_delay,
+            self._end_grace, self._notification_style, self._login_status, login_buttons,
+        ):
+            general_layout.setRowVisible(row, sys.platform == "darwin")
 
         layout.addWidget(general_group)
         readiness = QGroupBox("Readiness")
@@ -151,14 +157,15 @@ class SettingsDialog(QDialog):
         self._readiness.setWordWrap(True)
         ready_layout.addWidget(self._readiness)
         row = QHBoxLayout()
-        for title, callback in (
-            ("Refresh", self._refresh_readiness),
-            ("Request Notifications", self._request_notifications),
-            ("Test Notification", self._test_notification),
-            ("Test Audio (3 seconds)", self._test_audio),
+        for title, callback, everywhere in (
+            ("Refresh", self._refresh_readiness, True),
+            ("Request Notifications", self._request_notifications, False),
+            ("Test Notification", self._test_notification, False),
+            ("Test Audio (3 seconds)", self._test_audio, True),
         ):
             button = QPushButton(title)
             button.clicked.connect(callback)
+            button.setVisible(everywhere or sys.platform == "darwin")
             row.addWidget(button)
         ready_layout.addLayout(row)
         privacy = QPushButton("Open Audio Privacy Settings")
@@ -180,6 +187,8 @@ class SettingsDialog(QDialog):
         mic_request = QPushButton("Request Microphone Access")
         mic_request.clicked.connect(self._request_microphone)
         ready_layout.addWidget(mic_request)
+        for button in (privacy, system_privacy, mic_request):
+            button.setVisible(sys.platform == "darwin")
         layout.addWidget(readiness)
         self._ready_timer = QTimer(self)
         self._ready_timer.setInterval(1000)

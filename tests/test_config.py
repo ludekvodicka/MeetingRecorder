@@ -74,8 +74,8 @@ class TestDefaults:
     def test_live_speakers_are_off_by_default(self):
         assert config.DEFAULTS["live_speakers"] is False
 
-    def test_meeting_detection_is_safe_and_on_by_default(self):
-        assert config.DEFAULTS["meeting_detection"] is True
+    def test_meeting_detection_is_opt_in(self):
+        assert config.DEFAULTS["meeting_detection"] is False
 
     def test_calendar_detection_requires_an_explicit_opt_in(self):
         assert config.DEFAULTS["calendar_detection"] is False
