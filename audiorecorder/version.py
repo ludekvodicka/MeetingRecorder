@@ -4,4 +4,4 @@
 dynamic project version, and the release check compares it against the git tag.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
