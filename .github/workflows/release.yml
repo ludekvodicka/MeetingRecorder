@@ -40,7 +40,13 @@ jobs:
             libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
             libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-xinerama0 libportaudio2 libsndfile1 xclip \
-            libpulse0
+            libpulse0 pulseaudio
+
+      # With libpulse0 present PortAudio's PulseAudio backend fails Pa_Initialize, and so
+      # `import sounddevice`, unless a server answers. A daemon with no devices is enough.
+      - name: Start a PulseAudio server
+        if: runner.os == 'Linux'
+        run: pulseaudio --daemonize --exit-idle-time=-1
 
       - name: Install appimagetool
         if: runner.os == 'Linux'
