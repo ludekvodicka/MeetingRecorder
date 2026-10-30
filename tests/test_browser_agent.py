@@ -330,6 +330,11 @@ def test_host_registration_is_read_from_the_registry_or_the_macos_manifests(tmp_
         raise FileNotFoundError
 
     assert browser.host_manifests("win32", read_registry=missing) == ()
+
+    def no_winreg():
+        raise ModuleNotFoundError("winreg")
+
+    assert browser.host_manifests("win32", read_registry=no_winreg) == ()
     chrome, brave = browser.host_manifests("darwin", home=tmp_path)
     assert chrome == tmp_path / "Library/Application Support/Google/Chrome/NativeMessagingHosts" \
         / "com.ludekvodicka.browser_agent.json"

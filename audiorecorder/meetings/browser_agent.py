@@ -54,7 +54,8 @@ def host_manifests(platform_name=None, home=None, read_registry=_read_registered
     if platform_name == "win32":
         try:
             return (Path(read_registry()),)
-        except OSError:
+        # ImportError: a test that claims win32 on another system has no winreg.
+        except (OSError, ImportError):
             return ()
     if platform_name == "darwin":
         support = (Path.home() if home is None else Path(home)) / "Library/Application Support"
