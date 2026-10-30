@@ -22,7 +22,7 @@ from audiorecorder.meetings.detection import (  # noqa: E402
 )
 from audiorecorder.meetings.native_profiles import signing_identity  # noqa: E402
 from audiorecorder.ui import main_window as mw  # noqa: E402
-from audiorecorder.ui.main_window import ACTIVE_TOGGLE_STYLE, MainWindow  # noqa: E402
+from audiorecorder.ui.main_window import MainWindow  # noqa: E402
 
 
 class FakeCapture:
@@ -524,38 +524,52 @@ class TestMeetingPopupIntegration:
         assert not w._is_recording
 
 
-class TestTheButtonShowsItIsOn:
-    """Green is the signal that a paid session is live, as on the Dictation button."""
+class TestTheCostIsAlwaysVisible:
+    """A paid live function shows in the cost strip: armed before a call, billing during one."""
 
-    def test_it_is_green_when_switched_on(self, window):
+    def test_switching_translate_on_arms_it_for_the_next_recording(self, window):
         w = window(rts_translate=False)
 
         w._btn_rts.setChecked(True)
         w._toggle_subtitles()
 
-        assert w._btn_rts.styleSheet() == ACTIVE_TOGGLE_STYLE
+        assert not w._cost_strip.isHidden()
+        assert "Armed for next recording" in w._cost_strip.text()
+        assert "Translate" in w._cost_strip.text()
 
-    def test_it_is_plain_again_when_switched_off(self, window):
+    def test_switching_it_off_hides_the_strip(self, window):
         w = window(rts_translate=True)
 
         w._btn_rts.setChecked(False)
         w._toggle_subtitles()
 
-        assert w._btn_rts.styleSheet() == ""
+        assert w._cost_strip.isHidden()
 
-    def test_it_starts_green_when_the_setting_was_left_on(self, window):
-        """The setting is remembered, so the colour has to be right before any click."""
-        assert window(rts_translate=True)._btn_rts.styleSheet() == ACTIVE_TOGGLE_STYLE
+    def test_the_remembered_setting_shows_before_any_click(self, window):
+        w = window(rts_translate=True)
 
-    def test_it_starts_plain_when_the_setting_was_left_off(self, window):
-        assert window(rts_translate=False)._btn_rts.styleSheet() == ""
+        assert w._btn_rts.isChecked()
+        assert "Armed for next recording" in w._cost_strip.text()
 
-    def test_it_matches_the_dictation_button(self, window):
+    def test_nothing_shows_when_everything_is_off(self, window):
+        assert window(rts_translate=False)._cost_strip.isHidden()
+
+    def test_a_recording_with_subtitles_is_billing_now(self, window):
+        w = window(rts_translate=True)
+
+        w._start_recording()
+
+        assert "Live, billing now" in w._cost_strip.text()
+        assert "1 realtime session" in w._cost_strip.text()
+
+    def test_dictation_shows_in_the_strip(self, window):
         w = window(rts_translate=False)
 
         w._start_dictation()
 
-        assert w._btn_dictation.styleSheet() == ACTIVE_TOGGLE_STYLE
+        assert w._btn_dictation.isChecked()
+        assert "Dictation on" in w._cost_strip.text()
+        assert w._state_card.state == "dictation"
 
 
 def test_error_from_previous_capture_cannot_stop_next_recording(window):

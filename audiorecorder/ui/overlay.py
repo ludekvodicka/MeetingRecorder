@@ -1,13 +1,13 @@
 import math
 
 from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QApplication, QWidget
 
 PILL_W = 110
 PILL_H = 32
-IDLE_LINE_W = 44
-IDLE_LINE_H = 3
+IDLE_LINE_W = 28
+IDLE_LINE_H = 4
 N_BARS = 14
 
 
@@ -90,41 +90,30 @@ class OverlayWidget(QWidget):
 
     def _paint_idle(self, painter):
         w, h = self.width(), self.height()
-        line_x = (w - IDLE_LINE_W) / 2
-        line_y = (h - IDLE_LINE_H) / 2
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(180, 180, 180, 200)))
-        rect = QRectF(line_x, line_y, IDLE_LINE_W, IDLE_LINE_H)
+        painter.setBrush(QBrush(QColor(237, 238, 240, 140)))
+        rect = QRectF((w - IDLE_LINE_W) / 2, (h - IDLE_LINE_H) / 2, IDLE_LINE_W, IDLE_LINE_H)
         painter.drawRoundedRect(rect, IDLE_LINE_H / 2, IDLE_LINE_H / 2)
 
     def _paint_recording(self, painter):
         w, h = self.width(), self.height()
 
         path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, w, h), h / 2, h / 2)
-        painter.fillPath(path, QBrush(QColor(20, 20, 20, 240)))
+        path.addRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), (h - 1) / 2, (h - 1) / 2)
+        painter.fillPath(path, QBrush(QColor(23, 24, 27, 245)))
+        painter.setPen(QPen(QColor(255, 255, 255, 36), 1))
+        painter.drawPath(path)
 
-        bar_area_pad_x = 18
-        bar_spacing = (w - bar_area_pad_x * 2) / N_BARS
-        bar_width = max(2.0, bar_spacing * 0.55)
-        center_y = h / 2
-
-        base_level = 0.20
-        amp = min(1.1, base_level + self.level * 1.1)
-
+        # 14 bars, 3 px wide with a 3 px gap, 4 to 18 px high from the input level.
+        bar_w, gap = 3.0, 3.0
+        left = (w - (N_BARS * bar_w + (N_BARS - 1) * gap)) / 2
+        amp = min(1.0, 0.2 + self.level * 1.1)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 240)))
-
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
         for i in range(N_BARS):
             dist_from_center = abs(i - (N_BARS - 1) / 2) / ((N_BARS - 1) / 2)
             envelope = 1.0 - dist_from_center * 0.4
-
-            phase = self._t * 6 + self._bar_phases[i]
-            wave = (math.sin(phase) + 1) / 2
-
-            bar_h = max(3.0, amp * envelope * (0.4 + wave * 0.6) * (h - 10))
-
-            x = bar_area_pad_x + i * bar_spacing + (bar_spacing - bar_width) / 2
-            y = center_y - bar_h / 2
-
-            painter.drawRoundedRect(QRectF(x, y, bar_width, bar_h), bar_width / 2, bar_width / 2)
+            wave = (math.sin(self._t * 6 + self._bar_phases[i]) + 1) / 2
+            bar_h = 4 + 14 * amp * envelope * (0.4 + wave * 0.6)
+            x = left + i * (bar_w + gap)
+            painter.drawRoundedRect(QRectF(x, (h - bar_h) / 2, bar_w, bar_h), 1.5, 1.5)

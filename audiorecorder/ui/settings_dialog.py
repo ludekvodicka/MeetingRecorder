@@ -1,7 +1,7 @@
 import sys
 
-from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -29,18 +29,9 @@ from audiorecorder.audio.backend import SYSTEM_SOURCE_NONE, create_backend
 from audiorecorder.meetings.browser_agent import DOWNLOAD_URL, extension_folder, host_manifests
 from audiorecorder.meetings.native_calls import PROFILES, qualification_key
 from audiorecorder.readiness import CredentialProbe, microphone_permission
+from audiorecorder.ui import icons, theme
 
-COPY_ICON = (
-    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#9aa0a6" '
-    b'stroke-width="1.3"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>'
-    b'<path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>'
-)
-
-
-def _copy_icon():
-    pixmap = QPixmap()
-    pixmap.loadFromData(COPY_ICON, "SVG")
-    return QIcon(pixmap)
+COPIED_SECONDS = 1.5
 
 
 # Wide enough for the readiness lines to wrap once at most.
@@ -70,15 +61,23 @@ class SettingsDialog(QDialog):
 
     def _page(self, title):
         scroll = QScrollArea()
+        scroll.setObjectName("settingsPage")
         scroll.setWidgetResizable(True)
         contents = QWidget()
+        contents.setObjectName("settingsContents")
         scroll.setWidget(contents)
         self._tabs.addTab(scroll, title)
-        return scroll, QVBoxLayout(contents)
+        layout = QVBoxLayout(contents)
+        layout.setContentsMargins(0, 16, 0, 0)
+        layout.setSpacing(12)
+        return scroll, layout
 
     def _build_ui(self):
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 12, 20, 16)
+        outer.setSpacing(12)
         self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
         outer.addWidget(self._tabs)
         general_page = self._page("General")
         readiness_page = self._page("Readiness")
@@ -91,10 +90,10 @@ class SettingsDialog(QDialog):
         dir_row = QHBoxLayout()
         self._dir_edit = QLineEdit(self.config.get("output_dir", ""))
         dir_row.addWidget(self._dir_edit)
-        btn_browse = QPushButton("Browse...")
+        btn_browse = QPushButton("Browse…")
         btn_browse.clicked.connect(self._browse_dir)
         dir_row.addWidget(btn_browse)
-        general_layout.addRow("Output directory:", dir_row)
+        general_layout.addRow("Output folder", dir_row)
 
         self._meeting_detection = QCheckBox("Show a recording prompt when a meeting is detected")
         self._meeting_detection.setChecked(self.config.get("meeting_detection", False))
@@ -130,9 +129,9 @@ class SettingsDialog(QDialog):
             control.setRange(low, high)
             control.setSuffix(" seconds")
             control.setValue(self.config.get(key, 45 if key == "meeting_end_grace_seconds" else 5))
-        general_layout.addRow("Start countdown:", self._start_delay)
-        general_layout.addRow("Stop countdown:", self._stop_delay)
-        general_layout.addRow("Absence grace (advanced):", self._end_grace)
+        general_layout.addRow("Start countdown", self._start_delay)
+        general_layout.addRow("Stop countdown", self._stop_delay)
+        general_layout.addRow("Absence grace (advanced)", self._end_grace)
         self._notification_style = QComboBox()
         self._notification_style.addItem("Native macOS notifications", "native")
         self._notification_style.addItem("In-app controls", "in-app")
@@ -142,14 +141,14 @@ class SettingsDialog(QDialog):
                 self._notification_style.findData(self.config.get("notification_style", "native")),
             )
         )
-        general_layout.addRow("Meeting prompts:", self._notification_style)
+        general_layout.addRow("Meeting prompts", self._notification_style)
 
         self._launch_at_login = QCheckBox("Launch at login and keep meeting detection available")
         self._launch_at_login.setVisible(sys.platform == "darwin")
         self._launch_at_login.setChecked(self.config.get("launch_at_login", False))
         self._login_status = QLabel()
         self._login_status.setWordWrap(True)
-        general_layout.addRow("Login status:", self._login_status)
+        general_layout.addRow("Login status", self._login_status)
         login_buttons = QHBoxLayout()
         for title, enabled in (("Register", True), ("Disable", False)):
             button = QPushButton(title)
@@ -176,14 +175,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(general_group)
 
         # The switch sits beside the Browser Agent state it controls, so "off" explains itself.
-        detection_group = QGroupBox("Meeting Detection")
+        detection_group = QGroupBox("Meeting detection")
         detection_layout = QFormLayout(detection_group)
         detection_layout.addRow("", self._meeting_detection)
         detection_layout.addRow("", self._calendar_detection)
         detection_layout.setRowVisible(self._calendar_detection, sys.platform == "darwin")
         layout.addWidget(detection_group)
 
-        readiness = QGroupBox("Readiness")
+        readiness = QGroupBox("Readiness checks")
         ready_layout = QVBoxLayout(readiness)
         self._readiness = QLabel()
         self._readiness.setWordWrap(True)
@@ -235,17 +234,18 @@ class SettingsDialog(QDialog):
         self._refresh_browser_status()
         self._ready_timer.timeout.connect(self._refresh_browser_status)
         self._meeting_detection.toggled.connect(self._refresh_browser_status)
-        detection_layout.addRow("Browser Agent:", self._browser_status)
+        detection_layout.addRow("Browser agent", self._browser_status)
         browser_help = QLabel("Needs Agent access and the Meetings tools in each browser profile.")
+        browser_help.setObjectName("help")
         browser_help.setWordWrap(True)
         detection_layout.addRow("", browser_help)
-        detection_layout.addRow("Download:", self._copyable(DOWNLOAD_URL))
+        detection_layout.addRow("Download", self._copyable(DOWNLOAD_URL))
         folder = extension_folder(host_manifests())
         if folder is not None:
-            detection_layout.addRow("Extension folder:", self._copyable(str(folder)))
+            detection_layout.addRow("Extension folder", self._copyable(str(folder)))
 
         # --- Native detector diagnostics ---
-        native_group = QGroupBox("Native Meeting Detection")
+        native_group = QGroupBox("Native meeting detection")
         native_layout = QVBoxLayout(native_group)
         self._native_status = QLabel()
         self._native_status.setWordWrap(True)
@@ -262,6 +262,7 @@ class SettingsDialog(QDialog):
             "Reads call-control names only, not chat text or participants. Current matchers "
             "need supervised validation. Permission and app-version approval are separate."
         )
+        native_help.setObjectName("help")
         native_help.setWordWrap(True)
         native_layout.addWidget(native_help)
         access = QPushButton("Open Accessibility Settings")
@@ -319,25 +320,25 @@ class SettingsDialog(QDialog):
         layout.addWidget(native_group)
 
         # --- Audio ---
-        audio_group = QGroupBox("Audio Devices")
+        audio_group = QGroupBox("Audio devices")
         audio_layout = QFormLayout(audio_group)
 
         self._system_combo = QComboBox()
         self._mic_combo = QComboBox()
         self._populate_devices()
 
-        audio_layout.addRow("System audio source:", self._system_combo)
-        audio_layout.addRow("Microphone:", self._mic_combo)
+        audio_layout.addRow("System audio source", self._system_combo)
+        audio_layout.addRow("Microphone", self._mic_combo)
 
         self._system_vol = QSlider(Qt.Orientation.Horizontal)
         self._system_vol.setRange(0, 200)
         self._system_vol.setValue(int(self.config.get("system_volume", 1.0) * 100))
-        audio_layout.addRow("System volume:", self._system_vol)
+        audio_layout.addRow("System volume", self._system_vol)
 
         self._mic_vol = QSlider(Qt.Orientation.Horizontal)
         self._mic_vol.setRange(0, 200)
         self._mic_vol.setValue(int(self.config.get("mic_volume", 1.0) * 100))
-        audio_layout.addRow("Mic volume:", self._mic_vol)
+        audio_layout.addRow("Mic volume", self._mic_vol)
 
         layout.addWidget(audio_group)
 
@@ -354,7 +355,7 @@ class SettingsDialog(QDialog):
             self._lang_combo.setCurrentIndex(1)
         else:
             self._lang_combo.setCurrentIndex(2)
-        trans_layout.addRow("Language:", self._lang_combo)
+        trans_layout.addRow("Language", self._lang_combo)
 
         self._translate_check = QCheckBox("Enable translation")
         self._translate_check.setChecked(self.config.get("enable_translation", False))
@@ -364,7 +365,7 @@ class SettingsDialog(QDialog):
         self._translate_target.addItems(["English (en)", "Czech (cs)"])
         target = self.config.get("translation_target", "en")
         self._translate_target.setCurrentIndex(0 if target == "en" else 1)
-        trans_layout.addRow("Translate to:", self._translate_target)
+        trans_layout.addRow("Target language", self._translate_target)
 
         layout.addWidget(trans_group)
 
@@ -379,19 +380,22 @@ class SettingsDialog(QDialog):
         self._api_key_edit.setPlaceholderText(
             f"Leave blank to keep the stored key; {secrets.ENV_VAR} overrides it"
         )
-        api_layout.addRow("API Key:", self._api_key_edit)
+        api_layout.addRow("API key", self._api_key_edit)
 
         layout.addWidget(api_group)
 
         # --- Buttons ---
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         btn_row.addStretch()
         btn_ok = QPushButton("OK")
+        btn_ok.setProperty("variant", "primary")
+        btn_ok.setDefault(True)
         btn_ok.clicked.connect(self._save_and_close)
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
-        btn_row.addWidget(btn_ok)
         btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
         outer.addLayout(btn_row)
         self._pages = (general_page, readiness_page)
         self._buttons = btn_row
@@ -420,18 +424,38 @@ class SettingsDialog(QDialog):
         self.resize(width + chrome_width, height + chrome_height)
 
     def _copyable(self, text):
-        """Selectable text with a button that puts it on the clipboard."""
+        """A read-only value with a button that puts it on the clipboard."""
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(text)
-        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        row_layout.addWidget(label, 1)
+        row_layout.setSpacing(4)
+        value = QLineEdit(text)
+        value.setReadOnly(True)
+        value.setCursorPosition(0)
+        row_layout.addWidget(value, 1)
         button = QToolButton()
-        button.setIcon(_copy_icon())
+        button.setProperty("variant", "quiet")
         button.setToolTip("Copy to clipboard")
-        button.setAutoRaise(True)
-        button.clicked.connect(lambda: QApplication.clipboard().setText(text))
+
+        def show(copied):
+            glyph, tint = ("check", "success") if copied else ("copy", "text.secondary")
+            button.setIcon(icons.icon(glyph, theme.solid(tint), 16))
+            button.setIconSize(QSize(16, 16))
+            button.setToolTip("Copied" if copied else "Copy to clipboard")
+
+        # Owned by the button, so a dialog closed within the delay takes the timer along.
+        reset = QTimer(button)
+        reset.setSingleShot(True)
+        reset.setInterval(int(COPIED_SECONDS * 1000))
+        reset.timeout.connect(lambda: show(False))
+
+        def copy():
+            QApplication.clipboard().setText(text)
+            show(True)
+            reset.start()
+
+        button.clicked.connect(copy)
+        show(False)
         row_layout.addWidget(button)
         return row
 

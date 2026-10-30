@@ -31,15 +31,15 @@ and say in the release notes what was not exercised.
 - [ ] Record with the default system source: the system meter moves while something plays,
       the microphone meter moves while you speak
 - [ ] Stop: an `.m4a` appears in the list, plays back, and contains both voices
-- [ ] Mute Mic during a recording silences the microphone track but not the system track
+- [ ] Mute mic during a recording silences the microphone track but not the system track
 - [ ] Set the system source to "None (microphone only)": the status bar says the recording
       is microphone only, and the result contains just your voice
 - [ ] Pick a specific loopback device by name, restart the app, and confirm it is still selected
 - [ ] Transcribe a short recording: a `.md` appears with speakers and timestamps
 - [ ] With language `cs` and translation on, transcribe an English recording and confirm the
       Czech translation comes first and the English original follows
-- [ ] Cleanup on a transcript writes a `.summary.md` (needs the Claude CLI on PATH)
-- [ ] Without the Claude CLI on PATH, Cleanup fails with a readable message and no crash
+- [ ] Clean up with AI on a transcript writes a `.summary.md` (needs the Claude CLI on PATH)
+- [ ] Without the Claude CLI on PATH, Clean up with AI fails with a readable message and no crash
 - [ ] Dictation on, hold Ctrl+Space, speak, release: the text is pasted where the caret is
 - [ ] The same again with the Meeting Recorder window focused, and with the Dictation button
       the last thing clicked. The spacebar activates a focused button, so this is where
@@ -59,13 +59,13 @@ and say in the release notes what was not exercised.
       happen
 - [ ] The overlay pill appears at the bottom of the screen, animates while recording, and
       does not swallow mouse clicks
-- [ ] Switch RTS Translate on outside a recording: the status bar says it starts with the
+- [ ] Switch Translate on outside a recording: the cost strip says Armed for next recording, the status bar says it starts with the
       next one, and the subtitle area appears
 - [ ] Record a call in English with the language set to Czech: the original appears under the
       level meters with the Czech under it, within a couple of seconds of the words
 - [ ] Stop the recording: a `.live.md` sits beside the `.m4a` and matches what was on screen
-- [ ] Record with RTS Translate on and say nothing: no `.live.md` is written
-- [ ] Record with RTS Translate on and the language set to auto: subtitles appear untranslated
+- [ ] Record with Translate on and say nothing: no `.live.md` is written
+- [ ] Record with Translate on and the language set to auto: subtitles appear untranslated
       and the heading says so
 - [ ] With no system audio source configured, the subtitle area says it needs one instead of
       sitting empty
@@ -106,9 +106,9 @@ and say in the release notes what was not exercised.
 - [ ] With BlackHole installed and a multi-output device set up, selecting BlackHole as the
       explicit system source still captures system sound
 - [ ] Record, stop, then record again in the same app process; native capture starts both times
-- [ ] Switch RTS Translate on and confirm native system audio feeds live subtitles
-- [ ] Switch Live Speakers on: microphone speech appears as Me and two remote voices remain
-      distinct as Remote labels; Name Speakers updates future lines
+- [ ] Switch Translate on and confirm native system audio feeds live subtitles
+- [ ] Switch Speakers on: microphone speech appears as Me and two remote voices remain
+      distinct as Remote labels; Name speakers updates future lines
 - [ ] Stop after naming speakers: `.speakers.md` and `.speakers.json` appear only after the
       M4A succeeds, contain the final names for earlier lines too, and follow rename/delete
 - [ ] Open a Teams or Zoom meeting window: one prompt appears after the stable detection;
@@ -118,7 +118,7 @@ and say in the release notes what was not exercised.
       Teams browsing and chat do not trigger it
 - [ ] Install Browser Agent from its release (`browser-agent-host install`, extension loaded
       unpacked) in Brave/Chrome on Windows or macOS. With meeting detection off, Settings >
-      Meeting Detection says Browser Agent is not connected because detection is off. Enable
+      Meeting detection says Browser Agent is not connected because detection is off. Enable
       Agent access and Google Meet under Meetings. Settings shows the profile and enabled tool;
       open a Google Meet code URL and confirm one prompt on the next 15-second poll. Moving to a
       non-meeting page removes the signal. Other enabled profiles remain independently detectable

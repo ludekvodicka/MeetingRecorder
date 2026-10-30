@@ -16,6 +16,8 @@ SIDECAR_SUFFIXES = (
     ".md", ".summary.md", ".live.md", ".speakers.md", ".speakers.json",
     ".transcription.json",
 )
+# The side files a person reads, shown as badges on the recording.
+OUTPUT_SUFFIXES = (".md", ".summary.md", ".live.md", ".speakers.md")
 
 
 def sidecars(recording_path):
@@ -38,6 +40,8 @@ class Recording:
     is_transcribed: bool
     transcript_path: str
     transcription_status: str = ""
+    # Side files that exist, by suffix: ".md", ".summary.md", ".live.md", ".speakers.md".
+    outputs: tuple = ()
 
 
 class RecordingManager:
@@ -63,6 +67,10 @@ class RecordingManager:
                 is_transcribed=transcript.exists(),
                 transcript_path=str(transcript) if transcript.exists() else "",
                 transcription_status="" if transcript.exists() else checkpoint_status(f),
+                outputs=tuple(
+                    suffix for suffix in OUTPUT_SUFFIXES
+                    if f.with_name(f.stem + suffix).exists()
+                ),
             ))
         return recordings
 

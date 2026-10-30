@@ -78,13 +78,17 @@ def test_recording_progress_survives_refresh_and_all_mutating_buttons_disable():
     listing.set_processing(rec.path, 'Uploading audio...', busy=True)
     listing.set_recordings([rec])
     row = listing._item_widgets[0]
-    assert row._status_label.text() == 'Uploading audio...'
-    assert all(not button.isEnabled() for button in row._processing_buttons)
-    listing.set_processing(rec.path, 'Failed', busy=False)
-    assert all(button.isEnabled() for button in row._processing_buttons)
-    assert row._status_label.text() == 'Failed'
+    assert row._status_chip.text() == 'Uploading audio'
+    assert row._primary.isHidden() and not row._more.isEnabled()
+    listing.set_failure(rec.path, 'transcribe', 'test failure')
+    assert row._status_chip.text() == 'Failed'
+    assert row._more.isEnabled() and row._primary.text().strip() == 'Retry'
+    assert listing.failure(rec.path) == ('transcribe', 'test failure')
+    listing.set_processing(rec.path, 'Queued', busy=True)
+    assert row._status_chip.text() == 'Queued' and listing.failure(rec.path) is None
     listing.set_processing(rec.path, '', busy=False)
-    assert row._status_label.text() == 'Not transcribed'
+    assert row._status_chip.text() == 'Not transcribed'
+    assert row._primary.text().strip() == 'Transcribe'
 
 
 def test_transcribe_handler_guards_duplicate_and_queues_other_recording(monkeypatch):
@@ -100,6 +104,7 @@ def test_transcribe_handler_guards_duplicate_and_queues_other_recording(monkeypa
     window = Window()
     window._quitting = False
     window._busy_paths = set()
+    window._busy_kinds = {}
     window.config = {}
     window._processing = ProcessingQueue(window)
     workers, warnings = [], []

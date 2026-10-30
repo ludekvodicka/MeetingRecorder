@@ -37,7 +37,8 @@ from audiorecorder.shared.desktop.autoupdate.tests.support import (
 )
 from audiorecorder.shared.desktop.autoupdate.transport import UpdateTransport
 from audiorecorder.shared.desktop.autoupdate.view import UpdateViewModel
-from audiorecorder.ui.update_indicator import TONE_COLORS, UpdateDialog, UpdateIndicator
+from audiorecorder.ui import theme
+from audiorecorder.ui.update_indicator import TONES, UpdateDialog, UpdateIndicator
 from audiorecorder.updates import AppUpdates, QtUpdateHost
 from audiorecorder.version import __version__
 
@@ -203,7 +204,7 @@ class TestIndicator:
         indicator = UpdateIndicator(updates)
         updates.changed.emit(self.view(text, "muted"))
         assert indicator.text() == f"v{__version__}"
-        assert TONE_COLORS["muted"] in indicator.styleSheet()
+        assert theme.token(TONES["muted"][0]) in indicator.styleSheet()
 
     @pytest.mark.parametrize("text,tone", [
         ("Checking for updates", "working"),
@@ -216,7 +217,7 @@ class TestIndicator:
         indicator = UpdateIndicator(updates)
         updates.changed.emit(self.view(text, tone))
         assert indicator.text() == text
-        assert TONE_COLORS[tone] in indicator.styleSheet()
+        assert theme.token(TONES[tone][0]) in indicator.styleSheet()
 
     def test_a_source_run_starts_with_the_plain_version(self, app):
         assert UpdateIndicator(AppUpdates.create(app)).text() == f"v{__version__}"

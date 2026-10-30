@@ -22,7 +22,7 @@ def prompt(app):
 
 def button(prompt, text):
     return next(child for child in prompt.findChildren(QPushButton)
-                if child.text() == text)
+                if child.text().strip() == text)
 
 
 def test_the_prompt_names_the_detected_app_and_meeting(prompt):
@@ -34,14 +34,14 @@ def test_the_prompt_names_the_detected_app_and_meeting(prompt):
 def test_start_recording_accepts_the_prompt(prompt):
     accepted = []
     prompt.accepted.connect(lambda: accepted.append(True))
-    button(prompt, "Start Recording").click()
+    button(prompt, "Start recording").click()
     assert accepted == [True]
 
 
 def test_not_now_rejects_the_prompt(prompt):
     rejected = []
     prompt.rejected.connect(lambda: rejected.append(True))
-    button(prompt, "Not Now").click()
+    button(prompt, "Not now").click()
     assert rejected == [True]
 
 

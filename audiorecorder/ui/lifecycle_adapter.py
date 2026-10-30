@@ -13,7 +13,8 @@ from audiorecorder.meetings.call_monitor import NativeCallMonitor
 from audiorecorder.meetings.lifecycle import Lifecycle
 from audiorecorder.meetings.native_calls import PROFILES
 from audiorecorder.ui.macos_spaces import show_on_all_spaces
-from audiorecorder.ui.meeting_prompt import MeetingPrompt
+from audiorecorder.ui.meeting_prompt import MeetingPrompt, record_button
+from audiorecorder.ui.widgets import CountdownRing
 
 
 class LifecycleAdapter(QObject):
@@ -141,7 +142,10 @@ class LifecycleAdapter(QObject):
         window = self.window
         if window._meeting_prompt is not None:
             return
-        prompt = MeetingPrompt(candidate, None if sys.platform == "darwin" else window)
+        prompt = MeetingPrompt(
+            candidate, None if sys.platform == "darwin" else window,
+            cost_note=window.armed_cost_note(),
+        )
         window._meeting_prompt = prompt
         prompt.accepted.connect(lambda: self._manual_candidate(candidate.key))
         prompt.finished.connect(lambda result: window._clear_meeting_prompt(prompt))
@@ -199,18 +203,37 @@ class LifecycleAdapter(QObject):
         if self.fallback is not None:
             self.fallback.close()
         dialog = QDialog(None)
-        dialog.setWindowTitle("Meeting Recorder")
+        dialog.setWindowTitle("Automation")
         dialog.setWindowFlag(Qt.WindowType.Tool, True)
+        dialog.setFixedWidth(300)
         layout = QVBoxLayout(dialog)
-        label = QLabel()
-        layout.addWidget(label)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        self._countdown_ring = CountdownRing(44, "rec" if kind == "start" else "text.primary")
+        self._countdown_ring.set_remaining(self.controller.remaining or 0)
+        top.addWidget(self._countdown_ring)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        title = QLabel("Start pending" if kind == "start" else "Stop pending")
+        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        label = QLabel(
+            "A qualified call started" if kind == "start" else "The call has ended")
+        label.setObjectName("hint")
+        text.addWidget(title)
+        text.addWidget(label)
+        top.addLayout(text, 1)
+        layout.addLayout(top)
         row = QHBoxLayout()
-        for title, action in (
-            (("Start Now", "start"), ("Cancel", "cancel"))
-            if kind == "start"
-            else (("Stop Now", "stop"), ("Keep Recording", "keep"))
-        ):
-            button = QPushButton(title)
+        row.setSpacing(8)
+        row.addStretch()
+        if kind == "start":
+            buttons = ((QPushButton("Cancel"), "cancel"), (record_button("Start now"), "start"))
+        else:
+            buttons = ((QPushButton("Keep recording"), "keep"),
+                       (record_button("Stop now", "square"), "stop"))
+        for button, action in buttons:
             button.clicked.connect(
                 lambda checked=False, value=action: self._countdown_action(operation, value)
             )
@@ -219,6 +242,7 @@ class LifecycleAdapter(QObject):
         dialog.rejected.connect(lambda: self._countdown_action(operation, "cancel"))
         self.fallback = dialog
         self._countdown_label = label
+        self._countdown_detail = label.text()
         dialog.show()
         show_on_all_spaces(dialog)
         self.controller.offered(operation, dialog.isVisible())
@@ -345,7 +369,10 @@ class LifecycleAdapter(QObject):
         if self.controller.evidence_pending:
             text += " — verifying call state"
         if self.fallback:
-            self._countdown_label.setText(text)
+            self._countdown_ring.set_remaining(remaining or 0)
+            self._countdown_label.setText(
+                "Verifying the call state" if self.controller.evidence_pending
+                else self._countdown_detail)
         self.window._update_lifecycle_tray(text)
 
     def close(self):

@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QApplication
 
 from audiorecorder.config import load_config, save_config
 from audiorecorder.single_instance import LEGACY_SERVER_NAME, SingleInstance, user_server_name
+from audiorecorder.ui import theme
 from audiorecorder.ui.main_window import MainWindow
 from audiorecorder.ui.update_indicator import UpdateIndicator
 from audiorecorder.updates import AppUpdates
@@ -123,6 +124,7 @@ def main():
         # Closing the window hides it into the menu bar so meeting detection remains alive.
         app.setQuitOnLastWindowClosed(False)
     app.setStyle("Fusion")
+    theme.apply(app)
     app.setWindowIcon(QIcon(str(asset_path("icon.svg"))))
 
     # Before the window, and before any keyboard hook: a second copy would dictate and

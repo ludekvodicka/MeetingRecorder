@@ -45,10 +45,10 @@
    desired tools under **Meetings**: Google Meet, Zoom Web or Microsoft Teams Web. Grant the
    requested site permissions.
 3. In Meeting Recorder, enable **Show a recording prompt when a meeting is detected** and save.
-4. Within one 15-second poll, the status bar and **Settings > Meeting Detection** show the running
+4. Within one 15-second poll, the status bar and **Settings > Meeting detection** show the running
    profiles and enabled meeting tools. A closed profile is not discoverable.
 5. Open a supported meeting URL. The next successful poll offers a recording prompt. Pre-join
-   and ended meeting pages can also match; choose **Start Recording** only when appropriate.
+   and ended meeting pages can also match; choose **Start recording** only when appropriate.
    These signals never start or stop recording automatically.
 
 ## 4. Before joining
@@ -57,21 +57,21 @@
    Closing the red window button keeps detection running in the menu bar; use the menu-bar
    icon to start/stop recording or open the app. Use **Quit** in the Dock menu when prompts
    are no longer wanted.
-2. For live speaker labels, enable **Live Speakers**. It labels the microphone as **Me** and
+2. For live speaker labels, enable **Speakers**. It labels the microphone as **Me** and
    remote diarization as **Remote 1**, **Remote 2**, etc. This adds up to two paid Soniox
    realtime streams.
-3. Enable **RTS Translate** only if live translation is needed; it adds another paid realtime
+3. Enable **Translate** only if live translation is needed; it adds another paid realtime
    stream.
 4. Join the meeting. Native Teams/Zoom/Webex/Slack Huddle or the optional Browser Agent integration
    should show an advisory recording prompt. Native Teams media detection is conservative,
-   so allow up to about 20 seconds. Choose **Start Recording**. Qualified native call controls
+   so allow up to about 20 seconds. Choose **Start recording**. Qualified native call controls
    can instead offer an automatic countdown after the supervised setup and audio test.
 5. Confirm both level meters move. If system audio does not move, stop immediately and fix
    Screen & System Audio Recording permission before continuing.
 
 ## 5. During and after the meeting
 
-1. When remote labels appear, choose **Name Speakers** and map them to participant names.
+1. When remote labels appear, choose **Name speakers** and map them to participant names.
    Names assigned late are still applied to the complete saved speaker transcript.
 2. Stop recording at the end. Wait for **Saved** in the status bar before quitting.
 3. The output folder contains the `.m4a` plus `.speakers.md` and `.speakers.json` when live

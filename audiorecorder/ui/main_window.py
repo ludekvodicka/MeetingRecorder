@@ -5,19 +5,23 @@ import sys
 import time
 from collections import deque
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QBrush, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPushButton,
+    QSplitter,
+    QSplitterHandle,
     QStatusBar,
     QSystemTrayIcon,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -48,15 +52,17 @@ from audiorecorder.transcription.cleanup import CleanupWorker
 from audiorecorder.transcription.markdown import language_name
 from audiorecorder.transcription.service import TranscriptionOptions
 from audiorecorder.transcription.soniox import SonioxWorker
+from audiorecorder.ui import icons, theme
 from audiorecorder.ui.audio_player import AudioPlayerWidget
-from audiorecorder.ui.level_bars import DualLevelBars
 from audiorecorder.ui.lifecycle_adapter import LifecycleAdapter
 from audiorecorder.ui.overlay import OverlayWidget
 from audiorecorder.ui.processing import ProcessingQueue
 from audiorecorder.ui.recording_list import RecordingListWidget
 from audiorecorder.ui.settings_dialog import SettingsDialog
 from audiorecorder.ui.speaker_mapping import SpeakerMappingDialog
+from audiorecorder.ui.state_card import StateCard
 from audiorecorder.ui.subtitles import SubtitleView
+from audiorecorder.ui.widgets import Dot, ElidedLabel, IconLabel, Pulse, spaced
 from audiorecorder.version import __version__
 
 log = logging.getLogger(__name__)
@@ -66,15 +72,8 @@ AUTO_START_SOURCES = frozenset()  # Native heuristics await per-source qualifica
 # Windows shows its "apps are preventing shutdown" screen after about five seconds.
 SESSION_END_STOP_SECONDS = 4
 
-# Both header toggles look the same when they are on: green means this is costing you
-# a live Soniox session.
-ACTIVE_TOGGLE_STYLE = """
-    QPushButton {
-        background-color: #2e7d32; color: white; font-weight: bold;
-        border-radius: 4px; border: none; padding: 4px;
-    }
-    QPushButton:hover { background-color: #388e3c; }
-"""
+# Speaker colours repeat after the third remote voice.
+REMOTE_COLOURS = ("speaker.r1", "speaker.r2", "speaker.r3")
 
 
 def _meeting_prompt_parent(window, platform_name=None):
@@ -125,6 +124,73 @@ class DictationHotkeyFilter(QObject):
             event.key() == Qt.Key.Key_Space
             and event.modifiers() & Qt.KeyboardModifier.ControlModifier
         )
+
+
+class AppMark(QWidget):
+    """The red record mark beside the title."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(22, 22)
+        theme.notifier.changed.connect(self.update)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(theme.color("rec.fill")))
+        painter.drawRoundedRect(QRectF(0, 0, 22, 22), 6, 6)
+        painter.setBrush(QBrush(theme.color("text.onFill")))
+        painter.drawEllipse(QRectF(7, 7, 8, 8))
+
+
+class CostStrip(QFrame):
+    """A violet strip under the header whenever a paid live function is on."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("costStrip")
+        self.setFixedHeight(32)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(16, 0, 16, 0)
+        row.setSpacing(8)
+        self._icon = IconLabel("radio", "live", 15)
+        self._lead = QLabel()
+        self._lead.setObjectName("lead")
+        self._rest = ElidedLabel()
+        row.addWidget(self._icon)
+        row.addWidget(self._lead)
+        row.addWidget(self._rest, 1)
+        self._pulse = Pulse(self._icon)
+
+    def show_cost(self, lead, rest, billing):
+        self._lead.setText(lead)
+        self._rest.setText(rest)
+        if billing:
+            self._pulse.start()
+        else:
+            self._pulse.stop()
+        self.setVisible(True)
+
+    def text(self):
+        return f"{self._lead.text()} {self._rest.text()}"
+
+
+class GripHandle(QSplitterHandle):
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(theme.color("border.default")))
+        painter.drawRoundedRect(
+            QRectF((self.width() - 36) / 2, (self.height() - 4) / 2, 36, 4), 2, 2)
+
+
+class GripSplitter(QSplitter):
+    def createHandle(self):
+        handle = GripHandle(self.orientation(), self)
+        handle.setCursor(Qt.CursorShape.SplitVCursor)
+        return handle
 
 
 class EncoderWorker(QObject):
@@ -193,6 +259,10 @@ class MainWindow(QMainWindow):
         self._exit_ready = False
         self._session_ending = False
         self._tray_icon = None
+        self._last_capture_error = None
+        self._recording_line = None
+        self._live_shown = None
+        self._busy_kinds = {}
         self._browser_agent = BrowserAgentDetector(on_updated=self._browser_updated.emit)
         self._browser_updated.connect(
             self._browser_detection_updated, Qt.ConnectionType.QueuedConnection,
@@ -214,6 +284,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"Meeting Recorder - v{__version__}")
         self.setMinimumSize(600, 650)
+        self.resize(720, 800)
         self._build_ui()
         self._lifecycle = LifecycleAdapter(self, notifications)
         self._capture_session = CaptureSession()
@@ -287,7 +358,16 @@ class MainWindow(QMainWindow):
         self._update_browser_status()
 
     def _update_browser_status(self):
-        self._browser_status_label.setText(self._browser_agent.status().summary)
+        status = self._browser_agent.status()
+        self._browser_status_label.setText(status.summary)
+        if not status.active or not status.scanned:
+            tint = "text.tertiary"
+        elif status.profiles and not status.errors and all(
+                profile.connected for profile in status.profiles):
+            tint = "success"
+        else:
+            tint = "warning"
+        self._browser_dot.set_tint(tint)
 
     def _browser_detection_updated(self):
         if self.config.get("meeting_detection", False) and not self._quitting:
@@ -343,61 +423,98 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # --- Header ---
-        header = QHBoxLayout()
+        header = QFrame()
+        header.setObjectName("header")
+        header.setFixedHeight(56)
+        header_row = QHBoxLayout(header)
+        header_row.setContentsMargins(16, 0, 12, 0)
+        header_row.setSpacing(12)
+        brand = QHBoxLayout()
+        brand.setSpacing(8)
+        brand.addWidget(AppMark())
         title = QLabel("Meeting Recorder")
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        header.addWidget(title)
-        header.addStretch()
+        title.setObjectName("appTitle")
+        brand.addWidget(title)
+        header_row.addLayout(brand)
+        header_row.addStretch()
 
-        self._btn_dictation = QPushButton("Dictation")
-        self._btn_dictation.setCheckable(True)
-        self._btn_dictation.setFixedWidth(80)
+        toggles = QHBoxLayout()
+        toggles.setSpacing(6)
+        self._btn_dictation = self._live_toggle(
+            "Dictation", "keyboard",
+            "Dictation: Ctrl + Space types what you say into any app. "
+            "Uses Soniox realtime minutes.")
         self._btn_dictation.clicked.connect(self._toggle_dictation)
         supported, reason = HotkeyListener.support()
         if not supported:
             self._btn_dictation.setEnabled(False)
             self._btn_dictation.setToolTip(reason)
-        header.addWidget(self._btn_dictation)
-
-        self._btn_rts = QPushButton("RTS Translate")
-        self._btn_rts.setCheckable(True)
-        self._btn_rts.setFixedWidth(105)
-        self._btn_rts.setToolTip(
+        self._btn_rts = self._live_toggle(
+            "Translate", "languages",
             "Live translated subtitles of the system audio while recording. "
-            "Costs Soniox realtime minutes for the length of the call."
-        )
+            "Costs Soniox realtime minutes for the length of the call.")
         self._btn_rts.setChecked(bool(self.config.get("rts_translate")))
-        self._btn_rts.setStyleSheet(ACTIVE_TOGGLE_STYLE if self._btn_rts.isChecked() else "")
         self._btn_rts.clicked.connect(self._toggle_subtitles)
-        header.addWidget(self._btn_rts)
-
-        self._btn_live_speakers = QPushButton("Live Speakers")
-        self._btn_live_speakers.setCheckable(True)
-        self._btn_live_speakers.setFixedWidth(105)
-        self._btn_live_speakers.setToolTip(
+        self._btn_live_speakers = self._live_toggle(
+            "Speakers", "users",
             "Label microphone speech as Me and diarize system audio as Remote 1, "
-            "Remote 2, etc. Adds up to two Soniox realtime sessions while recording."
-        )
+            "Remote 2, etc. Adds up to two Soniox realtime sessions while recording.")
         self._btn_live_speakers.setChecked(bool(self.config.get("live_speakers")))
-        self._btn_live_speakers.setStyleSheet(
-            ACTIVE_TOGGLE_STYLE if self._btn_live_speakers.isChecked() else ""
-        )
         self._btn_live_speakers.clicked.connect(self._toggle_live_speakers)
-        header.addWidget(self._btn_live_speakers)
+        for button in (self._btn_dictation, self._btn_rts, self._btn_live_speakers):
+            toggles.addWidget(button)
+            button.toggled.connect(lambda _on: self._render_header_icons())
+        header_row.addLayout(toggles)
 
-        btn_add = QPushButton("Add")
-        btn_add.clicked.connect(self._add_files)
-        header.addWidget(btn_add)
+        separator = QFrame()
+        separator.setObjectName("vsep")
+        separator.setFixedSize(1, 20)
+        header_row.addWidget(separator)
 
-        btn_settings = QPushButton("Settings")
-        btn_settings.clicked.connect(self._open_settings)
-        header.addWidget(btn_settings)
-        layout.addLayout(header)
+        self._btn_add = self._quiet_button("file-plus", "Add audio files", self._add_files)
+        self._btn_settings = self._quiet_button("settings", "Settings", self._open_settings)
+        tools = QHBoxLayout()
+        tools.setSpacing(2)
+        tools.addWidget(self._btn_add)
+        tools.addWidget(self._btn_settings)
+        header_row.addLayout(tools)
+        layout.addWidget(header)
 
-        # --- Recording list ---
+        # --- What costs money right now ---
+        self._cost_strip = CostStrip()
+        layout.addWidget(self._cost_strip)
+
+        # --- Recorder state ---
+        self._state_card = StateCard()
+        self._state_card.record_button.clicked.connect(self._toggle_recording)
+        self._state_card.mute_button.clicked.connect(self._toggle_mute)
+        self._state_card.details_button.clicked.connect(self._show_last_capture_error)
+        self._btn_record = self._state_card.record_button
+        self._btn_mute = self._state_card.mute_button
+        self._timer_label = self._state_card.timer
+        self._level_bars = self._state_card.meters
+        card_holder = QVBoxLayout()
+        card_holder.setContentsMargins(16, 12, 16, 0)
+        card_holder.addWidget(self._state_card)
+        layout.addLayout(card_holder)
+
+        # --- Live panel above the library, only while it is wanted ---
+        self._splitter = GripSplitter(Qt.Orientation.Vertical)
+        self._splitter.setChildrenCollapsible(False)
+        self._subtitles = SubtitleView()
+        self._subtitles.speaker_names_requested.connect(self._name_speakers)
+        self._subtitles.set_speaker_mapping_visible(self._btn_live_speakers.isChecked())
+        self._live_holder = QWidget()
+        live_layout = QVBoxLayout(self._live_holder)
+        live_layout.setContentsMargins(16, 12, 16, 0)
+        live_layout.addWidget(self._subtitles)
+        self._splitter.addWidget(self._live_holder)
+
+        # --- Recording list, with the player inside the row that plays ---
         self._recording_list = RecordingListWidget()
         self._recording_list.play_requested.connect(self._play_recording)
         self._recording_list.stop_requested.connect(self._stop_recording_playback)
@@ -406,77 +523,127 @@ class MainWindow(QMainWindow):
         self._recording_list.move_requested.connect(self._move_recording)
         self._recording_list.delete_requested.connect(self._delete_recording)
         self._recording_list.open_transcript_requested.connect(self._open_transcript)
-        layout.addWidget(self._recording_list, stretch=1)
+        self._recording_list.details_requested.connect(self._show_processing_failure)
+        self._recording_list.add_requested.connect(self._add_files)
+        self._library_holder = QWidget()
+        library_layout = QVBoxLayout(self._library_holder)
+        library_layout.setContentsMargins(0, 8, 0, 0)
+        library_layout.addWidget(self._recording_list)
+        self._splitter.addWidget(self._library_holder)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 0)
+        layout.addWidget(self._splitter, stretch=1)
 
-        # --- Audio player (progress only) ---
         self._player = AudioPlayerWidget()
         self._player.playback_stopped.connect(self._on_playback_stopped)
-        layout.addWidget(self._player)
-
-        # --- Controls ---
-        controls = QVBoxLayout()
-        controls.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self._btn_record = QPushButton("Record")
-        self._btn_record.setFixedSize(120, 45)
-        self._btn_record.setStyleSheet("""
-            QPushButton {
-                background-color: #c62828; color: white; font-size: 16px;
-                font-weight: bold; border-radius: 22px; border: none;
-            }
-            QPushButton:hover { background-color: #b71c1c; }
-            QPushButton:pressed { background-color: #e53935; }
-        """)
-        self._btn_record.clicked.connect(self._toggle_recording)
-
-        self._btn_mute = QPushButton("Mute Mic")
-        self._btn_mute.setFixedSize(90, 35)
-        self._btn_mute.setStyleSheet("""
-            QPushButton {
-                background-color: #555; color: #ccc; font-size: 12px;
-                border-radius: 17px; border: none;
-            }
-            QPushButton:hover { background-color: #666; }
-        """)
-        self._btn_mute.clicked.connect(self._toggle_mute)
-        self._btn_mute.setVisible(False)
-
-        btn_row = QHBoxLayout()
-        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        btn_row.addWidget(self._btn_record)
-        btn_row.addWidget(self._btn_mute)
-        controls.addLayout(btn_row)
-
-        self._timer_label = QLabel("00:00:00")
-        self._timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._timer_label.setStyleSheet("font-size: 24px; font-family: monospace; color: #aaa;")
-        controls.addWidget(self._timer_label)
-
-        # --- Dual level bars ---
-        self._level_bars = DualLevelBars()
-        controls.addWidget(self._level_bars)
-
-        layout.addLayout(controls)
-
-        # --- Live subtitles, only while they are wanted ---
-        self._subtitles = SubtitleView()
-        self._subtitles.speaker_names_requested.connect(self._name_speakers)
-        self._subtitles.set_speaker_mapping_visible(self._btn_live_speakers.isChecked())
-        self._subtitles.setVisible(self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
-        layout.addWidget(self._subtitles, stretch=1)
+        self._recording_list.set_player(self._player)
 
         # --- Status bar ---
         self._status_bar = QStatusBar()
+        self._status_bar.setSizeGripEnabled(False)
         self.setStatusBar(self._status_bar)
+        browser = QWidget()
+        browser_row = QHBoxLayout(browser)
+        browser_row.setContentsMargins(0, 0, 8, 0)
+        browser_row.setSpacing(6)
+        self._browser_dot = Dot("text.tertiary", 6)
         self._browser_status_label = QLabel()
-        self._browser_status_label.setToolTip(
+        browser.setToolTip(
             "Browser Agent checks enabled meeting tools every 15 seconds while detection is on."
         )
-        self._status_bar.addPermanentWidget(self._browser_status_label)
+        browser_row.addWidget(self._browser_dot)
+        browser_row.addWidget(self._browser_status_label)
+        self._status_bar.addPermanentWidget(browser)
 
         # --- Timer ---
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_timer)
+
+        theme.notifier.changed.connect(self._render_header_icons)
+        self._render_header_icons()
+        # Start with the focus on the window itself, not on the first header toggle.
+        central.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        central.setFocus()
+        self._update_live_view_visibility()
+        self._update_cost_strip()
+
+    def _live_toggle(self, text, icon, tooltip):
+        button = QPushButton(spaced(text))
+        button.setProperty("toggle", "live")
+        button.setCheckable(True)
+        button.setToolTip(tooltip)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        # A click must not leave a focus ring on the toggle; Tab still reaches it.
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        button.setProperty("glyph", icon)
+        return button
+
+    def _quiet_button(self, icon, tooltip, slot):
+        button = QToolButton()
+        button.setProperty("variant", "quiet")
+        button.setProperty("glyph", icon)
+        button.setToolTip(tooltip)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(slot)
+        return button
+
+    def _render_header_icons(self):
+        for button in (self._btn_dictation, self._btn_rts, self._btn_live_speakers):
+            tint = "text.onFill" if button.isChecked() else (
+                "text.secondary" if button.isEnabled() else "text.disabled")
+            button.setIcon(icons.icon(button.property("glyph"), theme.solid(tint), 16))
+            button.setIconSize(QSize(16, 16))
+        for button in (self._btn_add, self._btn_settings):
+            button.setIcon(icons.icon(button.property("glyph"), theme.solid("text.secondary"), 18))
+            button.setIconSize(QSize(18, 18))
+
+    def _update_cost_strip(self):
+        """Say what costs Soniox realtime minutes: running now, or armed for the next call."""
+        if self._dictation_active:
+            self._cost_strip.show_cost(
+                "Dictation on", "Each dictation uses Soniox realtime minutes", billing=True)
+            return
+        translate = self._subtitle_engine is not None and self._btn_rts.isChecked()
+        speakers = [e for e in (self._mic_speaker_engine, self._remote_speaker_engine)
+                    if e is not None]
+        if self._is_recording and (translate or speakers):
+            parts = []
+            if translate:
+                target = self._subtitle_engine.target_language
+                parts.append(
+                    f"Translate, {self._source_name()} → {language_name(target)}"
+                    if target else "Subtitles, not translated")
+            if speakers:
+                parts.append("Speakers")
+            sessions = int(translate) + len(speakers)
+            unit = "session" if sessions == 1 else "sessions"
+            self._cost_strip.show_cost(
+                "Live, billing now", " and ".join(parts) + f" · {sessions} realtime {unit}",
+                billing=True)
+            return
+        armed = [name for name, button in (("Translate", self._btn_rts),
+                                           ("Speakers", self._btn_live_speakers))
+                 if button.isChecked()]
+        if armed and not self._is_recording:
+            self._cost_strip.show_cost(
+                "Armed for next recording",
+                " and ".join(armed) + " will use Soniox realtime minutes", billing=False)
+            return
+        self._cost_strip.setVisible(False)
+
+    def armed_cost_note(self):
+        """For a meeting prompt: which live functions a recording would start."""
+        armed = [name for name, button in (("Translate", self._btn_rts),
+                                           ("Speakers", self._btn_live_speakers))
+                 if button.isChecked()]
+        if not armed:
+            return None
+        verb = "is" if len(armed) == 1 else "are"
+        return f"{' and '.join(armed)} {verb} on and will use realtime minutes"
+
+    def _source_name(self):
+        language = self.config.get("language")
+        return "Auto" if language in (None, "auto") else language_name(language)
 
     def _toggle_recording(self):
         if self._lifecycle.controller.state == "capture-unresolved":
@@ -515,7 +682,7 @@ class MainWindow(QMainWindow):
                     self._last_capture_test.get("system"),
                     self._last_capture_test.get("mic"),
                 )
-        self._btn_record.setEnabled(False)
+        self._state_card.set_state("starting")
         self._status_bar.showMessage("Starting capture…")
         self._capture_session.start(recording, self._recording_config[recording])
 
@@ -528,9 +695,14 @@ class MainWindow(QMainWindow):
             self.config["capture_readiness"] = None
             self._last_capture_test = None
             save_config(self.config)
-            self._btn_record.setEnabled(True)
+            self._last_capture_error = ("Recording could not start", result.error)
             if result.unresolved:
-                self._btn_record.setText("Retry Stop")
+                self._state_card.set_state("failed", failure=(
+                    f"Capture could not start cleanly: {result.error}",
+                    "Retry stop to release the audio devices before you record again.",
+                ))
+            else:
+                self._state_card.set_state("idle")
             self._status_bar.showMessage(f"Capture failed: {result.error}")
             self._lifecycle.notify("error", "Recording could not start", body=result.error)
             self._show_recording_error("Recording could not start", result.error)
@@ -540,8 +712,11 @@ class MainWindow(QMainWindow):
             self._finish_pending_quit()
             return
         self._capture = result.backend
-        self._btn_record.setEnabled(True)
         system_name = self._capture.active_system_source
+        self._recording_line = (
+            "Recording microphone only" if system_name is None
+            else "Recording system audio and microphone")
+        self._state_card.set_state("recording", recording_line=self._recording_line)
         self._level_bars.set_device_names(
             system_name or "not recorded",
             self._capture.active_mic_source,
@@ -552,23 +727,6 @@ class MainWindow(QMainWindow):
         self._recording_start_time = time.time()
         self._timer.start(200)
 
-        self._btn_record.setText("Stop")
-        self._btn_record.setStyleSheet("""
-            QPushButton {
-                background-color: #424242; color: white; font-size: 16px;
-                font-weight: bold; border-radius: 22px; border: none;
-            }
-            QPushButton:hover { background-color: #555; }
-        """)
-        self._btn_mute.setVisible(True)
-        self._btn_mute.setText("Mute Mic")
-        self._btn_mute.setStyleSheet("""
-            QPushButton {
-                background-color: #555; color: #ccc; font-size: 12px;
-                border-radius: 17px; border: none;
-            }
-            QPushButton:hover { background-color: #666; }
-        """)
         if system_name is None:
             self._status_bar.showMessage(
                 "Recording microphone only, no system audio source is configured"
@@ -586,6 +744,8 @@ class MainWindow(QMainWindow):
             self._speaker_segments = []
             self._subtitles.set_speaker_mapping_available(0)
             self._start_speaker_recognition(system_name)
+        self._update_cost_strip()
+        self._update_live_view_visibility()
         self._last_capture_test = {
             "recording": result.recording,
             "time": time.time(),
@@ -614,24 +774,8 @@ class MainWindow(QMainWindow):
             return
         muted = not self._capture.mic_muted
         self._capture.mic_muted = muted
-        if muted:
-            self._btn_mute.setText("Unmute Mic")
-            self._btn_mute.setStyleSheet("""
-                QPushButton {
-                    background-color: #c62828; color: white; font-size: 12px;
-                    border-radius: 17px; border: none;
-                }
-                QPushButton:hover { background-color: #b71c1c; }
-            """)
-        else:
-            self._btn_mute.setText("Mute Mic")
-            self._btn_mute.setStyleSheet("""
-                QPushButton {
-                    background-color: #555; color: #ccc; font-size: 12px;
-                    border-radius: 17px; border: none;
-                }
-                QPushButton:hover { background-color: #666; }
-            """)
+        self._state_card.set_state("recording", muted=muted)
+        self._status_bar.showMessage("Microphone muted" if muted else "Recording...")
 
     def _stop_recording(self):
         self._lifecycle.controller.stop()
@@ -642,7 +786,7 @@ class MainWindow(QMainWindow):
         self._lifecycle.process()
 
     def _begin_stop(self, recording):
-        self._btn_record.setEnabled(False)
+        self._state_card.set_state("stopping")
         self._status_bar.showMessage("Stopping capture…")
         self._capture_session.stop(recording)
 
@@ -656,8 +800,15 @@ class MainWindow(QMainWindow):
                 self._last_capture_test["status"] = "Capture shutdown unresolved"
             save_config(self.config)
             controller.stopped(result.recording, success=False)
-            self._btn_record.setText("Retry Stop")
-            self._btn_record.setEnabled(True)
+            self._last_capture_error = (
+                "Capture shutdown is unresolved. Use Retry stop before starting again.",
+                result.error,
+            )
+            self._state_card.set_state("failed", failure=(
+                f"Capture shutdown unresolved: {result.error}",
+                "The audio recorded so far is kept on disk. Retry stop to finish saving, "
+                "or open Details for the recovery options.",
+            ))
             self._status_bar.showMessage(f"Capture shutdown unresolved: {result.error}")
             self._lifecycle.notify("error", "Capture shutdown needs attention", body=result.error)
             self._show_recording_error(
@@ -671,23 +822,14 @@ class MainWindow(QMainWindow):
         system_path, mic_path = result.paths
         self._capture = None
         controller.stopped(result.recording, has_audio=bool(mic_path))
-        self._btn_record.setEnabled(True)
         self._stop_speaker_recognition()
 
         self._is_recording = False
         self._timer.stop()
         self._level_bars.stop()
-        self._btn_mute.setVisible(False)
-
-        self._btn_record.setText("Record")
-        self._btn_record.setStyleSheet("""
-            QPushButton {
-                background-color: #c62828; color: white; font-size: 16px;
-                font-weight: bold; border-radius: 22px; border: none;
-            }
-            QPushButton:hover { background-color: #b71c1c; }
-            QPushButton:pressed { background-color: #e53935; }
-        """)
+        self._state_card.set_state("idle")
+        self._timer_label.setText("00:00:00")
+        self._update_live_view_visibility()
         # system_path is None on a microphone-only recording, which the encoder handles.
         if mic_path:
             output_name = self._manager.generate_filename()
@@ -850,6 +992,22 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Encoding failed; source audio retained")
         self._show_recording_error("Recording was not saved. Source audio was retained.", detail)
 
+    def _show_last_capture_error(self):
+        if self._last_capture_error is not None:
+            self._show_recording_error(*self._last_capture_error)
+
+    def _show_processing_failure(self, path):
+        failure = self._recording_list.failure(path)
+        if failure is None:
+            return
+        kind, error = failure
+        title = "Transcription Error" if kind == "transcribe" else "Cleanup Error"
+        dialog = QMessageBox(QMessageBox.Icon.Warning, title, str(error), parent=self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._error_dialogs.append(dialog)
+        dialog.destroyed.connect(lambda: self._error_dialogs.remove(dialog))
+        dialog.show()
+
     def _show_recording_error(self, message, detail):
         dialog = QMessageBox(self)
         dialog.setWindowTitle("Recording recovery")
@@ -890,13 +1048,17 @@ class MainWindow(QMainWindow):
     def _play_recording(self, path):
         self._player.play_file(path)
         self._recording_list.set_playing_path(path)
+        name = os.path.splitext(os.path.basename(path))[0]
+        self._status_bar.showMessage(f"Playing: {name}")
 
     def _stop_recording_playback(self, path):
         self._player.stop_playback()
         self._recording_list.clear_playing()
+        self._status_bar.clearMessage()
 
     def _on_playback_stopped(self):
         self._recording_list.clear_playing()
+        self._status_bar.clearMessage()
 
     def _open_transcript(self, path):
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
@@ -976,30 +1138,30 @@ class MainWindow(QMainWindow):
             options=TranscriptionOptions.from_config(self.config),
         )
         self._busy_paths.add(path)
+        self._busy_kinds[path] = "transcribe"
         self._processing.enqueue("transcribe", path, worker)
 
     def _on_processing_progress(self, path, message):
-        self._recording_list.set_processing(path, message, busy=True)
+        self._recording_list.set_processing(
+            path, message, busy=True, kind=self._busy_kinds.get(path))
         self._status_bar.showMessage(f"{os.path.basename(path)}: {message}")
 
     def _on_processing_completed(self, kind, path, output):
         self._busy_paths.discard(path)
+        self._busy_kinds.pop(path, None)
         self._recording_list.set_processing(path, "", busy=False)
         self._refresh_list()
         self._status_bar.showMessage(f"Saved: {os.path.basename(output)}", 8000)
 
     def _on_processing_failed(self, kind, path, error):
         self._busy_paths.discard(path)
+        self._busy_kinds.pop(path, None)
+        self._recording_list.set_failure(path, kind, error)
         self._refresh_list()
-        self._recording_list.set_processing(path, "Failed — retry or see error details", busy=False)
+        # The row shows Failed with See details; the dialog opens once, non-modal, so one
+        # failed queued job cannot stall other jobs or shutdown.
         self._status_bar.showMessage(f"Processing failed: {os.path.basename(path)}")
-        # Non-modal: one failed queued job must not stall other jobs or shutdown.
-        title = "Transcription Error" if kind == "transcribe" else "Cleanup Error"
-        dialog = QMessageBox(QMessageBox.Icon.Warning, title, str(error), parent=self)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self._error_dialogs.append(dialog)
-        dialog.destroyed.connect(lambda: self._error_dialogs.remove(dialog))
-        dialog.show()
+        self._show_processing_failure(path)
 
     def _cleanup_recording(self, path):
         if self._quitting:
@@ -1027,6 +1189,7 @@ class MainWindow(QMainWindow):
             transcript_path, self.config.get("summary_prompt", DEFAULT_SUMMARY_PROMPT)
         )
         self._busy_paths.add(path)
+        self._busy_kinds[path] = "cleanup"
         self._processing.enqueue("cleanup", path, worker)
 
     def _toggle_subtitles(self):
@@ -1034,7 +1197,7 @@ class MainWindow(QMainWindow):
         self.config["rts_translate"] = wanted
         save_config(self.config)
         self._update_live_view_visibility()
-        self._btn_rts.setStyleSheet(ACTIVE_TOGGLE_STYLE if wanted else "")
+        self._update_cost_strip()
         if wanted:
             # The subtitles read the capture backend, which only exists while recording.
             self._status_bar.showMessage("Subtitles start with the next recording", 5000)
@@ -1076,10 +1239,10 @@ class MainWindow(QMainWindow):
             return
 
         target = self._subtitle_engine.target_language
-        self._subtitles.set_status(
-            f"Live subtitles, translated into {language_name(target)}"
-            if target
-            else "Live subtitles, not translated"
+        self._subtitles.set_mode(
+            "Live subtitles",
+            f"{self._source_name()} → {language_name(target)}" if target else "Not translated",
+            "captions",
         )
         self._subtitle_engine.line_finalized.connect(self._subtitles.append_line)
         self._subtitle_engine.line_updated.connect(self._subtitles.set_pending)
@@ -1089,13 +1252,14 @@ class MainWindow(QMainWindow):
         self._subtitle_engine.error_occurred.connect(self._on_subtitle_error)
         self._subtitle_engine.start()
         self._refresh_audio_taps()
+        self._update_cost_strip()
 
     def _toggle_live_speakers(self):
         wanted = self._btn_live_speakers.isChecked()
         self.config["live_speakers"] = wanted
         save_config(self.config)
         self._update_live_view_visibility()
-        self._btn_live_speakers.setStyleSheet(ACTIVE_TOGGLE_STYLE if wanted else "")
+        self._update_cost_strip()
         self._subtitles.set_speaker_mapping_visible(wanted)
         if wanted:
             self._status_bar.showMessage("Speaker labels start with the next recording", 5000)
@@ -1104,7 +1268,21 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Live speaker recognition stopped", 5000)
 
     def _update_live_view_visibility(self):
-        self._subtitles.setVisible(self._btn_rts.isChecked() or self._btn_live_speakers.isChecked())
+        """The live panel shares the height with the library while a live function is on."""
+        wanted = self._btn_rts.isChecked() or self._btn_live_speakers.isChecked()
+        visible = wanted and (self._is_recording or self._subtitles.has_lines())
+        if visible == self._live_shown:
+            return
+        self._live_shown = visible
+        self._live_holder.setVisible(visible)
+        self._library_holder.layout().setContentsMargins(0, 0 if visible else 8, 0, 0)
+        if visible:
+            # After the layout has run, so the splitter knows its height.
+            QTimer.singleShot(0, self._size_live_panel)
+
+    def _size_live_panel(self):
+        library = 118 if self.height() < 700 else 196
+        self._splitter.setSizes([max(1, self._splitter.height() - library), library])
 
     def _start_speaker_recognition(self, system_source_name):
         api_key = secrets.get_api_key()
@@ -1143,12 +1321,13 @@ class MainWindow(QMainWindow):
             engine.start()
 
         if self._btn_rts.isChecked():
-            self._subtitles.set_status("Live subtitles and speaker labels")
+            self._subtitles.set_mode("Live subtitles and speakers", None, "captions")
         elif system_source_name is None:
-            self._subtitles.set_status("Live speaker transcript (microphone only)")
+            self._subtitles.set_mode("Live speakers", "Microphone only", "users")
         else:
-            self._subtitles.set_status("Live speaker transcript")
+            self._subtitles.set_mode("Live speakers", "Me · Remote", "users")
         self._refresh_audio_taps()
+        self._update_cost_strip()
 
     def _source_languages(self):
         return [self.config.get("language"), self.config.get("translation_target")]
@@ -1170,14 +1349,32 @@ class MainWindow(QMainWindow):
         self._speaker_segments.extend(merged)
         self._speaker_segments.sort(key=lambda line: line[0])
         self._refresh_audio_taps()
+        self._update_cost_strip()
 
     def _on_speaker_line(self, timestamp, speaker_id, text):
         if speaker_id != "Me":
             self._observed_remote_speakers.add(speaker_id)
             self._subtitles.set_speaker_mapping_available(len(self._observed_remote_speakers))
         self._subtitles.append_speaker_line(
-            timestamp, resolve_speaker(speaker_id, self._speaker_name_map), text
+            timestamp, resolve_speaker(speaker_id, self._speaker_name_map), text,
+            self._speaker_colour(speaker_id),
         )
+        self._update_speaker_detail()
+
+    @staticmethod
+    def _speaker_colour(speaker_id):
+        if speaker_id == "Me":
+            return "speaker.me"
+        number = "".join(ch for ch in speaker_id if ch.isdigit())
+        index = (int(number) - 1) if number else 0
+        return REMOTE_COLOURS[index % len(REMOTE_COLOURS)]
+
+    def _update_speaker_detail(self):
+        if self._btn_rts.isChecked() or self._remote_speaker_engine is None:
+            return
+        remotes = sorted(self._observed_remote_speakers, key=lambda label: (len(label), label))
+        names = ["Me"] + [resolve_speaker(label, self._speaker_name_map) for label in remotes]
+        self._subtitles.set_mode("Live speakers", " · ".join(names), "users")
 
     def _name_speakers(self):
         if not self._observed_remote_speakers:
@@ -1188,6 +1385,7 @@ class MainWindow(QMainWindow):
         for speaker_id in self._observed_remote_speakers:
             self._speaker_name_map.pop(speaker_id, None)
         self._speaker_name_map.update(dialog.mappings())
+        self._update_speaker_detail()
         self._status_bar.showMessage(
             "Speaker names will be used for new live lines and the complete sidecar", 6000
         )
@@ -1222,6 +1420,7 @@ class MainWindow(QMainWindow):
         self._subtitle_engine = None
         engine.stop()
         self._subtitles.set_pending("", "")
+        self._update_cost_strip()
         lines = engine.transcript()
         return (lines, engine.target_language) if lines else None
 
@@ -1301,9 +1500,10 @@ class MainWindow(QMainWindow):
 
         self._dictation_active = True
         self._btn_dictation.setChecked(True)
-        self._btn_dictation.setStyleSheet(ACTIVE_TOGGLE_STYLE)
+        self._state_card.set_state("dictation")
         self._level_bars.start()
-        self._level_bars.set_device_names("", "Dictation mic")
+        self._level_bars.set_device_names("", self.config.get("mic_source_name") or "Default")
+        self._update_cost_strip()
         self._overlay.activate()
         self._status_bar.showMessage(
             "Dictation ON - Ctrl+Space to dictate, Ctrl+Shift+Space to translate"
@@ -1316,8 +1516,9 @@ class MainWindow(QMainWindow):
 
         self._dictation_active = False
         self._btn_dictation.setChecked(False)
-        self._btn_dictation.setStyleSheet("")
         self._level_bars.stop()
+        self._state_card.set_state("idle")
+        self._update_cost_strip()
         self._overlay.deactivate()
         self._status_bar.showMessage("Dictation OFF", 3000)
 
@@ -1330,18 +1531,23 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Processing...")
         elif state == "idle":
             self._overlay.set_state("idle")
+            self._state_card.set_preview("")
             if self._dictation_active:
                 self._status_bar.showMessage("Dictation ON - Ctrl+Space to dictate")
         elif state.startswith("notice:"):
             self._overlay.set_state("idle")
+            self._state_card.set_preview("")
             self._status_bar.showMessage(state[7:], 5000)
         elif state.startswith("preview:"):
+            self._state_card.set_preview(state[8:])
             preview = state[8:]
             if len(preview) > 60:
                 preview = "..." + preview[-57:]
             self._status_bar.showMessage(f"Live: {preview}")
 
     def _on_dictation_pasted(self, text):
+        self._state_card.set_preview("")
+        self._state_card.set_pasted(text)
         if len(text) > 60:
             text = text[:57] + "..."
         self._status_bar.showMessage(f"Pasted: {text}", 5000)

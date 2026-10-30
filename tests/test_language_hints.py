@@ -93,10 +93,17 @@ class TestSilentFailuresNowSpeak:
             def showMessage(self, message, timeout=0):
                 self.messages.append(message)
 
+        class StubStateCard:
+            preview = "stale"
+
+            def set_preview(self, text):
+                self.preview = text
+
         class StubWindow:
             def __init__(self):
                 self._overlay = StubOverlay()
                 self._status_bar = StubStatusBar()
+                self._state_card = StubStateCard()
                 self._dictation_active = True
 
         window = StubWindow()
@@ -106,6 +113,10 @@ class TestSilentFailuresNowSpeak:
     def test_a_notice_reaches_the_status_bar(self):
         window = self.handle("notice:Nothing was recognized")
         assert window._status_bar.messages == ["Nothing was recognized"]
+
+    def test_a_notice_clears_the_live_preview(self):
+        window = self.handle("notice:Nothing was recognized")
+        assert window._state_card.preview == ""
 
     def test_a_notice_leaves_the_overlay_idle(self):
         window = self.handle("notice:Too short")

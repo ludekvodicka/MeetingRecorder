@@ -84,7 +84,7 @@ version = { attr = "audiorecorder.version.__version__" }
 include = ["audiorecorder*"]
 
 [tool.setuptools.package-data]
-audiorecorder = ["assets/*"]
+audiorecorder = ["assets/*", "assets/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "audiorecorder/shared"]

@@ -1,14 +1,6 @@
-import os
-
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PyQt6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QSlider,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSlider, QWidget
 
 
 class AudioPlayerWidget(QWidget):
@@ -29,36 +21,25 @@ class AudioPlayerWidget(QWidget):
         self._player.playbackStateChanged.connect(self._on_state_changed)
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 4)
-        layout.setSpacing(2)
-
-        self._now_playing = QLabel("")
-        self._now_playing.setStyleSheet("color: #888; font-size: 11px;")
-        self._now_playing.setVisible(False)
-        layout.addWidget(self._now_playing)
-
-        controls = QHBoxLayout()
-        controls.setSpacing(8)
+        # Shown inside the row that plays, under its meta line.
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 0)
+        layout.setSpacing(10)
 
         self._time_label = QLabel("0:00")
-        self._time_label.setStyleSheet("color: #aaa; font-size: 11px; font-family: monospace;")
-        self._time_label.setFixedWidth(40)
-        controls.addWidget(self._time_label)
+        self._time_label.setObjectName("playerTime")
+        layout.addWidget(self._time_label)
 
         self._slider = QSlider(Qt.Orientation.Horizontal)
         self._slider.setRange(0, 0)
         self._slider.sliderPressed.connect(self._on_seek_start)
         self._slider.sliderReleased.connect(self._on_seek_end)
         self._slider.setEnabled(False)
-        controls.addWidget(self._slider, stretch=1)
+        layout.addWidget(self._slider, stretch=1)
 
         self._duration_label = QLabel("0:00")
-        self._duration_label.setStyleSheet("color: #aaa; font-size: 11px; font-family: monospace;")
-        self._duration_label.setFixedWidth(40)
-        controls.addWidget(self._duration_label)
-
-        layout.addLayout(controls)
+        self._duration_label.setObjectName("playerTotal")
+        layout.addWidget(self._duration_label)
 
     @property
     def current_path(self):
@@ -73,9 +54,6 @@ class AudioPlayerWidget(QWidget):
         self._player.setSource(QUrl.fromLocalFile(path))
         self._player.play()
 
-        name = os.path.splitext(os.path.basename(path))[0]
-        self._now_playing.setText(f"Playing: {name}")
-        self._now_playing.setVisible(True)
         self._slider.setEnabled(True)
 
     def stop_playback(self):
@@ -88,7 +66,6 @@ class AudioPlayerWidget(QWidget):
         self._slider.setEnabled(False)
         self._time_label.setText("0:00")
         self._duration_label.setText("0:00")
-        self._now_playing.setVisible(False)
         self._current_path = ""
 
     def _on_position_changed(self, position):
