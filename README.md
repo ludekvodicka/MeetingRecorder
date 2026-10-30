@@ -114,9 +114,10 @@ feature is off by default and adds up to two paid Soniox realtime streams.
 
 **Offers recording when a meeting appears.** On macOS, stable Teams, Zoom, Webex, and Slack
 Huddle windows produce a non-modal recording prompt. Browser Agent adds Google Meet, Zoom Web,
-and Teams Web detection in Brave and Chrome on Windows and macOS. Install Browser Agent with its
-native host, enable **Agent access** and the desired **Meetings** tools in each profile, then enable
-meeting detection in Meeting Recorder. Settings shows the profiles and enabled meeting tools.
+and Teams Web detection in Brave and Chrome on Windows and macOS. Install
+[Browser Agent](https://github.com/ludekvodicka/BrowserAgentExtension) from its release (the extension plus a native host of a few
+megabytes, registered once with `browser-agent-host install`), enable **Agent access** and the
+desired **Meetings** tools in each profile, then enable meeting detection in Meeting Recorder. Settings shows the profiles and enabled meeting tools.
 Meeting Recorder asks every 15 seconds over a local OS channel. Browser signals only offer a
 recording prompt, including pre-join pages; they never start or stop a recording automatically.
 See [browser detection architecture](docs/architecture/browser-agent-meetings.md).
@@ -219,8 +220,8 @@ certutil -hashfile Meeting-Recorder-0.3.3-x64.exe SHA256    # Windows Command Pr
 - **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
   On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
   `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across. The DMG also
-  contains a next-meeting quick start. Install Browser Agent separately for browser meeting
-  detection.
+  contains a next-meeting quick start. Install [Browser Agent](https://github.com/ludekvodicka/BrowserAgentExtension) separately for
+  browser meeting detection.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 

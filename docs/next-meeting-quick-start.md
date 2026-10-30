@@ -30,13 +30,17 @@
 7. Start with manual recording. For native Teams/Zoom automation, complete the
    [supervised test checklist](native-call-test-checklist.md) before approving your app version.
    Window/media/browser/Calendar prompts remain advisory. Countdown defaults are five seconds.
-8. Use **Readiness** to request/test native notifications and check observed login status.
+8. Use the **Readiness** tab in Settings to request/test native notifications and check observed login status.
    Focus can suppress banners. The installed app offers a native **Start Recording** action;
    when unavailable, use the in-app prompt. **Test Audio (3 seconds)** uses saved device settings.
 
 ## 3. Optional browser meeting detection
 
-1. Install Browser Agent and register its native host for Brave or Chrome on this computer.
+1. Download Browser Agent from https://github.com/ludekvodicka/BrowserAgentExtension/releases and unzip it to a folder you
+   keep. Register its native host once: on Windows `browser-agent-host.exe install`; on macOS
+   `xattr -dr com.apple.quarantine .` and then `./browser-agent-host install` in that folder.
+   In each Brave or Chrome profile, open the extensions page, turn on Developer mode, choose
+   **Load unpacked** and select the `extension` folder.
 2. Open Browser Agent in each browser profile you want to use. Enable **Agent access** and the
    desired tools under **Meetings**: Google Meet, Zoom Web or Microsoft Teams Web. Grant the
    requested site permissions.

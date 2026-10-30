@@ -152,7 +152,7 @@ class BrowserAgentStatus:
     @property
     def summary(self):
         if not self.active:
-            return "Browser Agent: detection off"
+            return "Browser Agent: meeting detection off"
         if not self.scanned:
             return "Browser Agent: scanning"
         if not self.profiles:

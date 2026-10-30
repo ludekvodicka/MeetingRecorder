@@ -50,8 +50,10 @@ the affected candidates, so recovery may offer a new prompt.
 
 ## Constraints and trade-offs
 
-- Only running profiles are discoverable. Install Browser Agent and its native host separately,
-  and enable Agent access and the desired Meetings tools in each profile.
+- Only running profiles are discoverable. Install [Browser Agent](https://github.com/ludekvodicka/BrowserAgentExtension) and its
+  native host separately, and enable Agent access and the desired Meetings tools in each profile.
+  Its host is a small native binary started by the browser per profile; Meeting Recorder never
+  starts or installs it.
 - Browser Agent URL matching includes pre-join and ended pages; it does not prove participation.
   Titles and keys are untrusted data. The channel trusts processes of the same local OS user.
 - The normal prompt delay is one 15-second poll plus response/Qt dispatch time. A slow endpoint

@@ -160,7 +160,7 @@ def test_scan_is_nonblocking_stop_clears_and_late_results_cannot_repopulate():
         assert detector.scan() == []
         detector.stop()
         assert time.monotonic() - started < .1
-        assert detector.status().summary == "Browser Agent: detection off"
+        assert detector.status().summary == "Browser Agent: meeting detection off"
     finally:
         released.set()
         detector._thread.join(2)

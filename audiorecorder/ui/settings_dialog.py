@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -51,14 +52,21 @@ class SettingsDialog(QDialog):
         if self._lifecycle is not None:
             self._credential_probe.start()
 
-    def _build_ui(self):
-        outer = QVBoxLayout(self)
+    def _page(self, title):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         contents = QWidget()
         scroll.setWidget(contents)
-        outer.addWidget(scroll)
-        layout = QVBoxLayout(contents)
+        self._tabs.addTab(scroll, title)
+        return scroll, QVBoxLayout(contents)
+
+    def _build_ui(self):
+        outer = QVBoxLayout(self)
+        self._tabs = QTabWidget()
+        outer.addWidget(self._tabs)
+        general_page = self._page("General")
+        readiness_page = self._page("Readiness")
+        layout = general_page[1]
 
         # --- General ---
         general_group = QGroupBox("General")
@@ -190,7 +198,8 @@ class SettingsDialog(QDialog):
         ready_layout.addWidget(mic_request)
         for button in (privacy, system_privacy, mic_request):
             button.setVisible(sys.platform == "darwin")
-        layout.addWidget(readiness)
+        readiness_page[1].addWidget(readiness)
+        readiness_page[1].addStretch()
         self._ready_timer = QTimer(self)
         self._ready_timer.setInterval(1000)
         self._ready_timer.timeout.connect(self._refresh_readiness)
@@ -204,9 +213,11 @@ class SettingsDialog(QDialog):
         self._browser_status.setTextFormat(Qt.TextFormat.PlainText)
         self._refresh_browser_status()
         self._ready_timer.timeout.connect(self._refresh_browser_status)
+        self._meeting_detection.toggled.connect(self._refresh_browser_status)
         browser_layout.addRow("Status:", self._browser_status)
         browser_help = QLabel(
-            "Install Browser Agent and enable Agent access and its Meetings tools."
+            "Install Browser Agent (github.com/ludekvodicka/BrowserAgentExtension) and enable "
+            "Agent access and its Meetings tools."
         )
         browser_help.setWordWrap(True)
         browser_layout.addRow("", browser_help)
@@ -360,26 +371,35 @@ class SettingsDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_ok)
         btn_row.addWidget(btn_cancel)
-        layout.addLayout(btn_row)
-        self._fit_to_contents(scroll, contents)
+        outer.addLayout(btn_row)
+        self._fit_to_contents((general_page, readiness_page), btn_row)
 
-    def _fit_to_contents(self, scroll, contents):
-        """Open large enough to show every setting; scroll only on a screen too small for it."""
+    def _fit_to_contents(self, pages, buttons):
+        """Open large enough to show every tab; scroll only on a screen too small for it."""
         available = self.screen().availableGeometry()
         margins = self.layout().contentsMargins()
-        chrome_width = margins.left() + margins.right() + 2 * scroll.frameWidth()
-        chrome_height = margins.top() + margins.bottom() + 2 * scroll.frameWidth()
-        width = min(max(CONTENT_WIDTH, contents.minimumSizeHint().width()),
+        scroll = pages[0][0]
+        frame = 2 * scroll.frameWidth() + 2 * self._tabs.style().pixelMetric(
+            self._tabs.style().PixelMetric.PM_DefaultFrameWidth)
+        chrome_width = margins.left() + margins.right() + frame
+        chrome_height = (margins.top() + margins.bottom() + frame + 2 * self.layout().spacing()
+                         + self._tabs.tabBar().sizeHint().height() + buttons.sizeHint().height())
+        contents = [page.widget() for page, _ in pages]
+        widest = max(content.minimumSizeHint().width() for content in contents)
+        width = min(max(CONTENT_WIDTH, widest),
                     int(available.width() * SCREEN_SHARE) - chrome_width)
         # Wrapped labels need more height the narrower they are.
-        height = contents.layout().totalHeightForWidth(width)
-        if height < 0:
-            height = contents.sizeHint().height()
+        height = max(self._content_height(content, width) for content in contents)
         limit = int(available.height() * SCREEN_SHARE) - chrome_height
         if height > limit:
             height = limit
             width += scroll.verticalScrollBar().sizeHint().width()
         self.resize(width + chrome_width, height + chrome_height)
+
+    @staticmethod
+    def _content_height(contents, width):
+        height = contents.layout().totalHeightForWidth(width)
+        return height if height >= 0 else contents.sizeHint().height()
 
     def _browse_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Select output directory", self._dir_edit.text())
@@ -389,6 +409,13 @@ class SettingsDialog(QDialog):
     def _refresh_browser_status(self):
         if self._browser_agent is None:
             message = "Available after Meeting Recorder starts"
+        elif not self._browser_agent.status().active:
+            message = (
+                "Meeting detection is off. Turn on \"Show a recording prompt when a meeting is "
+                "detected\" above and press OK; the browser profiles then appear here."
+                if not self._meeting_detection.isChecked()
+                else "Starts when you press OK."
+            )
         else:
             status = self._browser_agent.status()
             lines = [status.summary]

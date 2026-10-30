@@ -116,7 +116,9 @@ and say in the release notes what was not exercised.
 - [ ] Join a modern Teams call whose window title is only the meeting subject: within about
       20 seconds Settings reports Teams media monitor active and one prompt appears; ordinary
       Teams browsing and chat do not trigger it
-- [ ] Install Browser Agent and its native host in Brave/Chrome on Windows or macOS. Enable
+- [ ] Install Browser Agent from its release (`browser-agent-host install`, extension loaded
+      unpacked) in Brave/Chrome on Windows or macOS. With meeting detection off, Settings >
+      Browser Agent says how to turn it on. Enable
       Agent access and Google Meet under Meetings. Settings shows the profile and enabled tool;
       open a Google Meet code URL and confirm one prompt on the next 15-second poll. Moving to a
       non-meeting page removes the signal. Other enabled profiles remain independently detectable
