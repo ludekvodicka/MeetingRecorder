@@ -18,6 +18,10 @@ POLL_SECONDS = 15
 REQUEST_TIMEOUT = 3
 MAX_RESPONSE_BYTES = 1024 * 1024
 PIPE_DIRECTORY = "\\\\.\\pipe\\"
+HOST_NAME = "com.ludekvodicka.browser_agent"
+DOWNLOAD_URL = "https://github.com/ludekvodicka/BrowserAgentExtension"
+# Written by `browser-agent-host install` beside the installed host: {"extension": "<folder>"}.
+INSTALL_RECORD = "browser-agent.json"
 MEETING_TOOLS = {
     "meetings.web.googleMeet": "Google Meet",
     "meetings.web.zoom": "Zoom Web",
@@ -34,6 +38,43 @@ def discover_endpoints(platform_name=None, home=None):
         directory = (Path.home() if home is None else Path(home)) / ".browser-agent/run"
         return tuple(str(path) for path in sorted(directory.glob("browser-agent-*.sock")))
     return ()
+
+
+def _read_registered_manifest():
+    import winreg
+
+    key = r"Software\Google\Chrome\NativeMessagingHosts" + "\\" + HOST_NAME
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as handle:
+        return winreg.QueryValue(handle, None)
+
+
+def host_manifests(platform_name=None, home=None, read_registry=_read_registered_manifest):
+    """Where the browsers look for the Browser Agent native host registration."""
+    platform_name = sys.platform if platform_name is None else platform_name
+    if platform_name == "win32":
+        try:
+            return (Path(read_registry()),)
+        except OSError:
+            return ()
+    if platform_name == "darwin":
+        support = (Path.home() if home is None else Path(home)) / "Library/Application Support"
+        return tuple(support / browser / "NativeMessagingHosts" / f"{HOST_NAME}.json"
+                     for browser in ("Google/Chrome", "BraveSoftware/Brave-Browser"))
+    return ()
+
+
+def extension_folder(manifests):
+    """The extension folder Browser Agent's install recorded beside its host, if it still exists."""
+    for manifest in manifests:
+        try:
+            host = Path(json.loads(manifest.read_text(encoding="utf-8"))["path"])
+            recorded = json.loads((host.parent / INSTALL_RECORD).read_text(encoding="utf-8"))
+            folder = Path(recorded["extension"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if folder.is_absolute() and (folder / "manifest.json").is_file():
+            return folder
+    return None
 
 
 def _remaining(deadline, stopped):

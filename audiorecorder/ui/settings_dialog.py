@@ -1,8 +1,9 @@
 import sys
 
 from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -18,14 +19,29 @@ from PyQt6.QtWidgets import (
     QSlider,
     QSpinBox,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from audiorecorder import macos_login, secrets
 from audiorecorder.audio.backend import SYSTEM_SOURCE_NONE, create_backend
+from audiorecorder.meetings.browser_agent import DOWNLOAD_URL, extension_folder, host_manifests
 from audiorecorder.meetings.native_calls import PROFILES, qualification_key
 from audiorecorder.readiness import CredentialProbe, microphone_permission
+
+COPY_ICON = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#9aa0a6" '
+    b'stroke-width="1.3"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>'
+    b'<path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>'
+)
+
+
+def _copy_icon():
+    pixmap = QPixmap()
+    pixmap.loadFromData(COPY_ICON, "SVG")
+    return QIcon(pixmap)
+
 
 # Wide enough for the readiness lines to wrap once at most.
 CONTENT_WIDTH = 640
@@ -82,14 +98,12 @@ class SettingsDialog(QDialog):
 
         self._meeting_detection = QCheckBox("Show a recording prompt when a meeting is detected")
         self._meeting_detection.setChecked(self.config.get("meeting_detection", False))
-        general_layout.addRow("", self._meeting_detection)
 
         self._calendar_detection = QCheckBox("Use macOS Calendar for scheduled meeting prompts")
         self._calendar_detection.setChecked(self.config.get("calendar_detection", False))
         self._calendar_detection.setEnabled(self._meeting_detection.isChecked())
         self._calendar_detection.setVisible(sys.platform == "darwin")
         self._meeting_detection.toggled.connect(self._calendar_detection.setEnabled)
-        general_layout.addRow("", self._calendar_detection)
 
         self._automatic_recording = QCheckBox("Automatically start qualified native calls")
         self._automatic_recording.setChecked(self.config.get("automatic_recording", False))
@@ -160,6 +174,15 @@ class SettingsDialog(QDialog):
             general_layout.setRowVisible(row, sys.platform == "darwin")
 
         layout.addWidget(general_group)
+
+        # The switch sits beside the Browser Agent state it controls, so "off" explains itself.
+        detection_group = QGroupBox("Meeting Detection")
+        detection_layout = QFormLayout(detection_group)
+        detection_layout.addRow("", self._meeting_detection)
+        detection_layout.addRow("", self._calendar_detection)
+        detection_layout.setRowVisible(self._calendar_detection, sys.platform == "darwin")
+        layout.addWidget(detection_group)
+
         readiness = QGroupBox("Readiness")
         ready_layout = QVBoxLayout(readiness)
         self._readiness = QLabel()
@@ -206,22 +229,20 @@ class SettingsDialog(QDialog):
         self._ready_timer.start()
         self._refresh_readiness()
 
-        browser_group = QGroupBox("Browser Agent")
-        browser_layout = QFormLayout(browser_group)
         self._browser_status = QLabel()
         self._browser_status.setWordWrap(True)
         self._browser_status.setTextFormat(Qt.TextFormat.PlainText)
         self._refresh_browser_status()
         self._ready_timer.timeout.connect(self._refresh_browser_status)
         self._meeting_detection.toggled.connect(self._refresh_browser_status)
-        browser_layout.addRow("Status:", self._browser_status)
-        browser_help = QLabel(
-            "Install Browser Agent (github.com/ludekvodicka/BrowserAgentExtension) and enable "
-            "Agent access and its Meetings tools."
-        )
+        detection_layout.addRow("Browser Agent:", self._browser_status)
+        browser_help = QLabel("Needs Agent access and the Meetings tools in each browser profile.")
         browser_help.setWordWrap(True)
-        browser_layout.addRow("", browser_help)
-        layout.addWidget(browser_group)
+        detection_layout.addRow("", browser_help)
+        detection_layout.addRow("Download:", self._copyable(DOWNLOAD_URL))
+        folder = extension_folder(host_manifests())
+        if folder is not None:
+            detection_layout.addRow("Extension folder:", self._copyable(str(folder)))
 
         # --- Native detector diagnostics ---
         native_group = QGroupBox("Native Meeting Detection")
@@ -372,7 +393,9 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(btn_ok)
         btn_row.addWidget(btn_cancel)
         outer.addLayout(btn_row)
-        self._fit_to_contents((general_page, readiness_page), btn_row)
+        self._pages = (general_page, readiness_page)
+        self._buttons = btn_row
+        self._fit_to_contents(self._pages, self._buttons)
 
     def _fit_to_contents(self, pages, buttons):
         """Open large enough to show every tab; scroll only on a screen too small for it."""
@@ -396,6 +419,22 @@ class SettingsDialog(QDialog):
             width += scroll.verticalScrollBar().sizeHint().width()
         self.resize(width + chrome_width, height + chrome_height)
 
+    def _copyable(self, text):
+        """Selectable text with a button that puts it on the clipboard."""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        label = QLabel(text)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row_layout.addWidget(label, 1)
+        button = QToolButton()
+        button.setIcon(_copy_icon())
+        button.setToolTip("Copy to clipboard")
+        button.setAutoRaise(True)
+        button.clicked.connect(lambda: QApplication.clipboard().setText(text))
+        row_layout.addWidget(button)
+        return row
+
     @staticmethod
     def _content_height(contents, width):
         height = contents.layout().totalHeightForWidth(width)
@@ -411,21 +450,25 @@ class SettingsDialog(QDialog):
             message = "Available after Meeting Recorder starts"
         elif not self._browser_agent.status().active:
             message = (
-                "Meeting detection is off. Turn on \"Show a recording prompt when a meeting is "
-                "detected\" above and press OK; the browser profiles then appear here."
+                "Not connected: meeting detection is off. Check the box above and press OK."
                 if not self._meeting_detection.isChecked()
-                else "Starts when you press OK."
+                else "Connects when you press OK."
             )
         else:
             status = self._browser_agent.status()
-            lines = [status.summary]
+            lines = [status.summary.removeprefix("Browser Agent: ")]
             for profile in status.profiles:
                 tools = ", ".join(profile.tools) or "no meeting tools enabled"
                 suffix = f" ({profile.error})" if profile.error else ""
                 lines.append(f"{profile.label}: {tools}{suffix}")
             lines.extend(status.errors)
             message = "\n".join(lines)
+        if message == self._browser_status.text():
+            return
         self._browser_status.setText(message)
+        # The profile list arrives after the dialog opened; grow with it instead of scrolling.
+        if hasattr(self, "_pages"):
+            QTimer.singleShot(0, lambda: self._fit_to_contents(self._pages, self._buttons))
 
     def _refresh_native_status(self):
         if self._meeting_detector is None:

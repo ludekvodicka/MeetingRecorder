@@ -290,7 +290,9 @@ class SubtitleEngine(QObject):
         if not text:
             return None
         line = (_now(), speaker, text)
-        self._timed_speaker_lines.append((time.monotonic_ns(), *line))
+        # perf_counter_ns: monotonic_ns ticks every ~16 ms on Windows, so lines of the two
+        # streams finalized within one tick would tie and lose their order in the merge.
+        self._timed_speaker_lines.append((time.perf_counter_ns(), *line))
         return line
 
     def _flush_speaker_line(self):

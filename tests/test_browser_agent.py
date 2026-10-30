@@ -1,11 +1,14 @@
 import ctypes
 import json
+import os
 import socket
 import sys
+import tempfile
 import threading
 import time
 import uuid
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -293,10 +296,12 @@ def test_silent_real_pipe_hits_deadline_and_closes():
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets unavailable")
-def test_real_unix_socket_uses_json_lines(tmp_path):
-    endpoint = str(tmp_path / "peer.sock")
+def test_real_unix_socket_uses_json_lines():
+    # macOS caps socket paths at 104 bytes and pytest's tmp_path under $TMPDIR exceeds it.
+    directory = tempfile.TemporaryDirectory(dir="/tmp")
+    endpoint = os.path.join(directory.name, "peer.sock")
     requests = []
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+    with directory, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         server.bind(endpoint)
         server.listen(1)
         server.settimeout(2)
@@ -315,3 +320,34 @@ def test_real_unix_socket_uses_json_lines(tmp_path):
             thread.join(2)
             assert not thread.is_alive()
     assert requests == [{"protocolVersion": 4, "op": "describe"}]
+
+
+def test_host_registration_is_read_from_the_registry_or_the_macos_manifests(tmp_path):
+    assert browser.host_manifests("win32", read_registry=lambda: r"C:\x\host.json") == (
+        Path(r"C:\x\host.json"),)
+
+    def missing():
+        raise FileNotFoundError
+
+    assert browser.host_manifests("win32", read_registry=missing) == ()
+    chrome, brave = browser.host_manifests("darwin", home=tmp_path)
+    assert chrome == tmp_path / "Library/Application Support/Google/Chrome/NativeMessagingHosts" \
+        / "com.ludekvodicka.browser_agent.json"
+    assert "Brave-Browser" in str(brave)
+    assert browser.host_manifests("linux") == ()
+
+
+def test_extension_folder_comes_from_the_install_record_beside_the_host(tmp_path):
+    host_dir = tmp_path / "install"
+    host_dir.mkdir()
+    manifest = tmp_path / "host.json"
+    manifest.write_text(json.dumps({"path": str(host_dir / "browser-agent-host.exe")}), "utf-8")
+    extension = tmp_path / "extension"
+    extension.mkdir()
+    assert browser.extension_folder([manifest]) is None
+    (host_dir / "browser-agent.json").write_text(json.dumps({"extension": str(extension)}), "utf-8")
+    assert browser.extension_folder([manifest]) is None
+    (extension / "manifest.json").write_text("{}", "utf-8")
+    assert browser.extension_folder([tmp_path / "missing.json", manifest]) == extension
+    (host_dir / "browser-agent.json").write_text(json.dumps({"extension": "relative"}), "utf-8")
+    assert browser.extension_folder([manifest]) is None

@@ -19,8 +19,12 @@ def app():
 
 @pytest.fixture
 def lock_name():
-    """A lock of the tests' own, so a running application does not fail the suite."""
-    return f"AudioRecorder.test-{uuid.uuid4().hex}"
+    """A lock of the tests' own, so a running application does not fail the suite.
+
+    Short, because on macOS Qt puts the socket under the long $TMPDIR and socket paths are
+    capped at 104 bytes; with "-legacy" appended a full UUID no longer fits.
+    """
+    return f"AudioRecorder.test-{uuid.uuid4().hex[:12]}"
 
 
 @pytest.fixture

@@ -45,7 +45,7 @@
    desired tools under **Meetings**: Google Meet, Zoom Web or Microsoft Teams Web. Grant the
    requested site permissions.
 3. In Meeting Recorder, enable **Show a recording prompt when a meeting is detected** and save.
-4. Within one 15-second poll, the status bar and **Settings > Browser Agent** show the running
+4. Within one 15-second poll, the status bar and **Settings > Meeting Detection** show the running
    profiles and enabled meeting tools. A closed profile is not discoverable.
 5. Open a supported meeting URL. The next successful poll offers a recording prompt. Pre-join
    and ended meeting pages can also match; choose **Start Recording** only when appropriate.
