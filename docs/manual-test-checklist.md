@@ -116,13 +116,16 @@ and say in the release notes what was not exercised.
 - [ ] Join a modern Teams call whose window title is only the meeting subject: within about
       20 seconds Settings reports Teams media monitor active and one prompt appears; ordinary
       Teams browsing and chat do not trigger it
-- [ ] Reveal the app-bundled browser companion from Settings and load it in Brave/Chrome/Edge;
-      confirm the status bar says Browser: connected, open a Google Meet code URL, and confirm
-      the same prompt; moving to a non-meeting page removes the signal
+- [ ] Install Browser Agent and its native host in Brave/Chrome on Windows or macOS. Enable
+      Agent access and Google Meet under Meetings. Settings shows the profile and enabled tool;
+      open a Google Meet code URL and confirm one prompt on the next 15-second poll. Moving to a
+      non-meeting page removes the signal. Other enabled profiles remain independently detectable
+- [ ] Disable the meeting tool, Agent access, or close the profile: candidates disappear on the
+      next poll and Settings explains the state. Turning detection off stops all browser polling
 - [ ] Enable Calendar detection, grant Calendar access, and confirm an imminent attended or
       linked event prompts while a personal reminder and an all-day event do not
-- [ ] Enable automatic recording, open a detected app/browser meeting, and cancel the visible
-      10-second countdown; repeat and let it finish; confirm Calendar alone never counts down
+- [ ] Enable automatic recording for a qualified native call and cancel the visible countdown;
+      repeat and let it finish. Browser Agent and Calendar signals never count down or start audio
 - [ ] Begin a countdown and close the meeting before zero: no recording starts
 - [ ] Click the menu-bar icon with the main window open, minimized and closed: the menu shows
       Start Recording, Stop Recording and Open Meeting Recorder without raising the window
@@ -133,7 +136,7 @@ and say in the release notes what was not exercised.
 - [ ] While dictation is active or capture shutdown is unresolved, Start Recording is disabled;
       Open Meeting Recorder provides access to the controls and any capture recovery
 - [ ] Close the macOS main window: it hides, the menu-bar icon remains, and a meeting still
-      prompts; choose Quit from the Dock menu and confirm the process and localhost bridge stop
+      prompts; choose Quit from the Dock menu and confirm the process and Browser Agent polling stop
 - [ ] Enable Launch at login, log out/in, and confirm the app launches and detects a meeting;
       disable it and confirm macOS no longer launches it
 - [ ] Dictation asks for Accessibility permission, and works once it is granted

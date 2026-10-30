@@ -50,7 +50,7 @@ def test_macos_package_can_notarize_and_staple(macos_package, monkeypatch):
     ]
 
 
-def test_macos_dmg_stages_the_browser_companion_and_quick_start(tmp_path):
+def test_macos_dmg_stages_the_app_and_quick_start(tmp_path):
     app = tmp_path / "Meeting Recorder.app"
     app.mkdir()
     target = tmp_path / "dmg"
@@ -58,7 +58,6 @@ def test_macos_dmg_stages_the_browser_companion_and_quick_start(tmp_path):
     build.prepare_macos_dmg_root(app, target)
 
     assert (target / "Meeting Recorder.app").is_dir()
-    assert (target / "Meeting Recorder Browser Extension" / "manifest.json").is_file()
     assert (target / "READ ME - Next Meeting.md").is_file()
     assert (target / "native-call-test-checklist.md").is_file()
     assert (target / "native-lifecycle.md").is_file()
@@ -87,11 +86,6 @@ def test_macos_entitlements_and_privacy_text_include_calendar_access():
     specification = (build.ROOT / "MeetingRecorder.spec").read_text(encoding="utf-8")
     assert "com.apple.security.personal-information.calendars" in entitlements
     assert "NSCalendarsFullAccessUsageDescription" in specification
-
-
-def test_packaged_app_contains_the_browser_companion():
-    specification = (build.ROOT / "MeetingRecorder.spec").read_text(encoding="utf-8")
-    assert '"browser-extension"' in specification
 
 
 @pytest.mark.parametrize(

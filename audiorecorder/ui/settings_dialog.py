@@ -23,17 +23,18 @@ from PyQt6.QtWidgets import (
 
 from audiorecorder import macos_login, secrets
 from audiorecorder.audio.backend import SYSTEM_SOURCE_NONE, create_backend
-from audiorecorder.meetings.browser_companion import (
-    companion_available,
-    companion_directory,
-)
 from audiorecorder.meetings.native_calls import PROFILES, qualification_key
 from audiorecorder.readiness import CredentialProbe, microphone_permission
+
+# Wide enough for the readiness lines to wrap once at most.
+CONTENT_WIDTH = 640
+# Share of the screen the dialog may take before it scrolls.
+SCREEN_SHARE = 0.9
 
 
 class SettingsDialog(QDialog):
     def __init__(
-        self, config, parent=None, browser_bridge=None, meeting_detector=None, lifecycle=None
+        self, config, parent=None, browser_agent=None, meeting_detector=None, lifecycle=None
     ):
         super().__init__(parent)
         self.config = dict(config)
@@ -42,7 +43,7 @@ class SettingsDialog(QDialog):
         self._credential_status = "Unknown"
         self._credential_probe = CredentialProbe(self)
         self._credential_probe.finished.connect(self._credential_result)
-        self._browser_bridge = browser_bridge
+        self._browser_agent = browser_agent
         self._meeting_detector = meeting_detector
         self.setWindowTitle("Settings")
         self.setMinimumWidth(450)
@@ -196,19 +197,16 @@ class SettingsDialog(QDialog):
         self._ready_timer.start()
         self._refresh_readiness()
 
-        # --- Browser companion ---
-        browser_group = QGroupBox("Browser Meeting Detection")
+        browser_group = QGroupBox("Browser Agent")
         browser_layout = QFormLayout(browser_group)
         self._browser_status = QLabel()
+        self._browser_status.setWordWrap(True)
+        self._browser_status.setTextFormat(Qt.TextFormat.PlainText)
         self._refresh_browser_status()
+        self._ready_timer.timeout.connect(self._refresh_browser_status)
         browser_layout.addRow("Status:", self._browser_status)
-        reveal_companion = QPushButton("Reveal Companion Folder…")
-        reveal_companion.setEnabled(companion_available())
-        reveal_companion.clicked.connect(self._reveal_browser_companion)
-        browser_layout.addRow("", reveal_companion)
         browser_help = QLabel(
-            "In Brave, open brave://extensions, enable Developer mode, choose Load unpacked, "
-            "and select the revealed folder."
+            "Install Browser Agent and enable Agent access and its Meetings tools."
         )
         browser_help.setWordWrap(True)
         browser_layout.addRow("", browser_help)
@@ -363,6 +361,25 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(btn_ok)
         btn_row.addWidget(btn_cancel)
         layout.addLayout(btn_row)
+        self._fit_to_contents(scroll, contents)
+
+    def _fit_to_contents(self, scroll, contents):
+        """Open large enough to show every setting; scroll only on a screen too small for it."""
+        available = self.screen().availableGeometry()
+        margins = self.layout().contentsMargins()
+        chrome_width = margins.left() + margins.right() + 2 * scroll.frameWidth()
+        chrome_height = margins.top() + margins.bottom() + 2 * scroll.frameWidth()
+        width = min(max(CONTENT_WIDTH, contents.minimumSizeHint().width()),
+                    int(available.width() * SCREEN_SHARE) - chrome_width)
+        # Wrapped labels need more height the narrower they are.
+        height = contents.layout().totalHeightForWidth(width)
+        if height < 0:
+            height = contents.sizeHint().height()
+        limit = int(available.height() * SCREEN_SHARE) - chrome_height
+        if height > limit:
+            height = limit
+            width += scroll.verticalScrollBar().sizeHint().width()
+        self.resize(width + chrome_width, height + chrome_height)
 
     def _browse_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Select output directory", self._dir_edit.text())
@@ -370,31 +387,18 @@ class SettingsDialog(QDialog):
             self._dir_edit.setText(d)
 
     def _refresh_browser_status(self):
-        if self._browser_bridge is None:
+        if self._browser_agent is None:
             message = "Available after Meeting Recorder starts"
         else:
-            status = self._browser_bridge.companion_status()
-            if status.connected:
-                message = "Connected — Brave/Chrome companion heartbeat received"
-            elif status.listening:
-                message = "Not connected — install or enable the companion"
-            else:
-                message = f"Unavailable — {status.error or 'local bridge is not running'}"
+            status = self._browser_agent.status()
+            lines = [status.summary]
+            for profile in status.profiles:
+                tools = ", ".join(profile.tools) or "no meeting tools enabled"
+                suffix = f" ({profile.error})" if profile.error else ""
+                lines.append(f"{profile.label}: {tools}{suffix}")
+            lines.extend(status.errors)
+            message = "\n".join(lines)
         self._browser_status.setText(message)
-
-    def _reveal_browser_companion(self):
-        directory = companion_directory()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
-        QMessageBox.information(
-            self,
-            "Install Browser Companion",
-            "In Brave:\n\n"
-            "1. Open brave://extensions\n"
-            "2. Enable Developer mode\n"
-            "3. Choose Load unpacked\n"
-            f"4. Select this folder:\n{directory}\n\n"
-            "Keep Meeting Recorder running. Settings will then show Connected.",
-        )
 
     def _refresh_native_status(self):
         if self._meeting_detector is None:

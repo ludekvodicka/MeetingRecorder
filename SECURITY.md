@@ -35,9 +35,12 @@ Worth knowing when judging the impact of a finding:
   Windows and Linux AppImage packages install updates themselves, while macOS and unpacked Linux
   builds notify only. Source runs keep checks off. SHA-256 checksums detect corrupt downloads;
   they do not authenticate a release when supplied by that same release.
-- **Meeting detection is opt-in.** When it is on, the application listens on `127.0.0.1:8765`
-  for the browser companion, without a token. Any local process can therefore show a meeting
-  prompt, but none can start a recording: that needs the user's click.
+- **Meeting detection is opt-in.** Browser detection queries Browser Agent's enabled meeting
+  tools every 15 seconds through Windows named pipes or macOS Unix sockets. It opens no network
+  listener. Browser Agent owns site permissions and its Agent access switch. The channel trusts
+  processes of the same OS user; a local process impersonating a profile can offer a meeting
+  prompt. Browser candidates never start or stop recording automatically. Responses are bounded,
+  version-checked and treated as data; no meeting page content or audio is requested.
 
 ## Builds are unsigned
 

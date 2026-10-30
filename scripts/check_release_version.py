@@ -6,7 +6,6 @@ can trace back to a commit. Outside a tag build it only checks that the version 
 semantic version, which is what the workflow_dispatch build-only path needs.
 """
 
-import json
 import os
 import re
 import sys
@@ -16,19 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from audiorecorder.version import __version__  # noqa: E402
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-EXTENSION_MANIFEST = Path(__file__).resolve().parent.parent / "browser-extension" / "manifest.json"
 
 
 def check(ref_type, ref_name):
     if not SEMVER.match(__version__):
         return f"audiorecorder/version.py holds {__version__!r}, which is not MAJOR.MINOR.PATCH."
-
-    extension_version = json.loads(
-        EXTENSION_MANIFEST.read_text(encoding="utf-8"))["version"]
-    if extension_version != __version__:
-        return (f"browser-extension/manifest.json holds {extension_version!r}, but the "
-                f"application version is {__version__}. Run: python scripts/set_version.py "
-                f"{__version__}")
 
     if ref_type != "tag":
         print(f"version {__version__} (no tag to compare against)")

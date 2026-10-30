@@ -1,5 +1,4 @@
 import importlib.util
-import json
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
@@ -13,24 +12,20 @@ def load_script(name):
     return module
 
 
-def test_release_check_includes_the_extension_version():
+def test_release_check_accepts_the_application_version():
     check = load_script("check_release_version")
     assert check.check("", "") is None
 
 
-def test_set_version_synchronizes_the_extension(tmp_path, monkeypatch):
+def test_set_version_updates_the_application_version(tmp_path, monkeypatch):
     setter = load_script("set_version")
     version_file = tmp_path / "version.py"
     version_file.write_text('__version__ = "0.2.0"\n', encoding="utf-8")
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text('{"version": "0.2.0"}\n', encoding="utf-8")
     monkeypatch.setattr(setter, "VERSION_FILE", version_file)
-    monkeypatch.setattr(setter, "EXTENSION_MANIFEST", manifest)
 
     setter.set_version("0.3.0")
 
     assert '__version__ = "0.3.0"' in version_file.read_text(encoding="utf-8")
-    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == "0.3.0"
 
 
 def test_release_build_tools_are_versioned_and_verified_before_execution():

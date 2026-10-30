@@ -3,18 +3,15 @@
     python scripts/set_version.py 0.2.0
 
 Rewrites the single assignment in audiorecorder/version.py, which pyproject.toml, the
-window title, the updater and the release workflow all read, then synchronizes the
-browser companion manifest used by Chrome and Edge.
+window title, the updater and the release workflow all read.
 """
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
 
 VERSION_FILE = Path(__file__).resolve().parent.parent / "audiorecorder" / "version.py"
-EXTENSION_MANIFEST = Path(__file__).resolve().parent.parent / "browser-extension" / "manifest.json"
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
 
@@ -29,14 +26,7 @@ def set_version(version):
         raise SystemExit(f"Expected exactly one __version__ assignment in {VERSION_FILE}, "
                          f"found {count}.")
 
-    manifest = json.loads(EXTENSION_MANIFEST.read_text(encoding="utf-8"))
-    manifest["version"] = version
     VERSION_FILE.write_text(new_text, encoding="utf-8", newline="\n")
-    EXTENSION_MANIFEST.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
     print(f"version set to {version}")
 
 

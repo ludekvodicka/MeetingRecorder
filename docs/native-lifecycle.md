@@ -10,7 +10,7 @@ by default, and automated fixtures do not establish real-provider reliability.
 | --- | --- |
 | Native Teams/Zoom Accessibility controls | Candidate joined/end evidence; requires explicit inspection opt-in, permission and tested app-version approval or a temporary supervised test |
 | Existing window/geometry and Teams media metadata | Advisory recording prompts |
-| Webex/Slack windows, browser companion, Calendar | Advisory recording prompts |
+| Webex/Slack windows, Browser Agent meeting tabs, Calendar | Advisory recording prompts |
 
 `macos_call_probe.py` runs in a disposable child with time, node, window and output bounds.
 It reads control roles/enabled state and matches exact English labels. It excludes text

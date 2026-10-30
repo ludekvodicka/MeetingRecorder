@@ -1,4 +1,4 @@
-"""The sidecar written from what the subtitles showed, and the companions of a recording.
+"""The sidecar written from what the subtitles showed, and the sidecars of a recording.
 
 The sidecar is free, the text is already on screen when the recording stops. What it must
 not do is appear when nothing was recognised, or get left behind when the recording it
@@ -83,13 +83,13 @@ class TestSidecars:
             (directory / f"{stem}{suffix}").write_text("x", encoding="utf-8")
         return str(directory / f"{stem}.m4a")
 
-    def test_every_companion_is_found(self, tmp_path):
+    def test_every_sidecar_is_found(self, tmp_path):
         recording = self.make(tmp_path, "call", SIDECAR_SUFFIXES)
         assert {p.name for p in sidecars(recording)} == {
             "call.md", "call.summary.md", "call.live.md",
             "call.speakers.md", "call.speakers.json", "call.transcription.json"}
 
-    def test_missing_companions_are_not_invented(self, tmp_path):
+    def test_missing_sidecars_are_not_invented(self, tmp_path):
         recording = self.make(tmp_path, "call", [".md"])
         assert [p.name for p in sidecars(recording)] == ["call.md"]
 

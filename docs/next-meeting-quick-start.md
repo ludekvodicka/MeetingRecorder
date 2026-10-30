@@ -36,16 +36,16 @@
 
 ## 3. Optional browser meeting detection
 
-1. In Meeting Recorder, open **Settings** and choose **Reveal Companion Folder**. This opens
-   the permanent copy bundled inside the installed app; do not select a folder from the DMG.
-2. In Brave open `brave://extensions`; in Chrome use `chrome://extensions`; in Edge use
-   `edge://extensions`.
-3. Enable **Developer mode**, choose **Load unpacked**, and select the revealed
-   `browser-extension` folder.
-4. Confirm the app status bar changes from **Browser: not connected** to
-   **Browser: connected** within about 30 seconds.
-5. The extension can see only supported Meet/Zoom/Teams meeting pages and can contact only
-   `127.0.0.1`. It has no history, tabs, or tab-capture permission.
+1. Install Browser Agent and register its native host for Brave or Chrome on this computer.
+2. Open Browser Agent in each browser profile you want to use. Enable **Agent access** and the
+   desired tools under **Meetings**: Google Meet, Zoom Web or Microsoft Teams Web. Grant the
+   requested site permissions.
+3. In Meeting Recorder, enable **Show a recording prompt when a meeting is detected** and save.
+4. Within one 15-second poll, the status bar and **Settings > Browser Agent** show the running
+   profiles and enabled meeting tools. A closed profile is not discoverable.
+5. Open a supported meeting URL. The next successful poll offers a recording prompt. Pre-join
+   and ended meeting pages can also match; choose **Start Recording** only when appropriate.
+   These signals never start or stop recording automatically.
 
 ## 4. Before joining
 
@@ -58,7 +58,7 @@
    realtime streams.
 3. Enable **RTS Translate** only if live translation is needed; it adds another paid realtime
    stream.
-4. Join the meeting. Native Teams/Zoom/Webex/Slack Huddle or the optional browser companion
+4. Join the meeting. Native Teams/Zoom/Webex/Slack Huddle or the optional Browser Agent integration
    should show an advisory recording prompt. Native Teams media detection is conservative,
    so allow up to about 20 seconds. Choose **Start Recording**. Qualified native call controls
    can instead offer an automatic countdown after the supervised setup and audio test.
@@ -76,7 +76,7 @@
    immediate aids; batch diarization remains the more accurate transcript of record.
 
 If no prompt appears, recording still works manually. Check that meeting detection is enabled,
-Meeting Recorder is still running, and—only for browser calls—the unpacked extension remains
-enabled. The app status bar must say **Browser: connected**; if it does not, open Settings and
-reveal/load the bundled companion again. For native Teams, open Settings after joining and
-check that **Teams media monitor** changes from **idle** to **active**.
+Meeting Recorder is still running, and the browser profile has Browser Agent and its native host
+running. Settings shows profiles, enabled meeting tools and connection failures. Check **Agent
+access**, the desired **Meetings** switch and site permissions in that profile. For native Teams,
+open Settings after joining and check that **Teams media monitor** changes from **idle** to **active**.

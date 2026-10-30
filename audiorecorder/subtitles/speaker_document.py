@@ -72,7 +72,7 @@ def render_speaker_json(lines, source_name, speaker_names=None):
 
 
 def write_speaker_sidecars(recording_path, lines, speaker_names=None):
-    """Write Markdown and JSON companions, returning both paths or ``None``."""
+    """Write Markdown and JSON sidecars, returning both paths or ``None``."""
     if not lines:
         return None
     markdown_path, json_path = speaker_sidecar_paths(recording_path)

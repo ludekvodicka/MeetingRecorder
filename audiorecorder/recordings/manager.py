@@ -19,7 +19,7 @@ SIDECAR_SUFFIXES = (
 
 
 def sidecars(recording_path):
-    """The companion files that exist for this recording."""
+    """The sidecar files that exist for this recording."""
     recording = Path(recording_path)
     candidates = (recording.with_name(recording.stem + suffix) for suffix in SIDECAR_SUFFIXES)
     return [path for path in candidates if path.exists()]

@@ -29,7 +29,7 @@ from audiorecorder.audio.session import CaptureSession
 from audiorecorder.config import DEFAULT_SUMMARY_PROMPT, save_config
 from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
-from audiorecorder.meetings.browser_bridge import BrowserMeetingBridge
+from audiorecorder.meetings.browser_agent import BrowserAgentDetector
 from audiorecorder.meetings.calendar_detection import create_calendar_detector
 from audiorecorder.meetings.detection import (
     CombinedMeetingDetector,
@@ -157,6 +157,7 @@ class MainWindow(QMainWindow):
     _system_level_signal = pyqtSignal(float)
     _mic_level_signal = pyqtSignal(float)
     _capture_error_signal = pyqtSignal(str, str)
+    _browser_updated = pyqtSignal()
 
     def __init__(self, config, notifications=None):
         super().__init__()
@@ -192,13 +193,16 @@ class MainWindow(QMainWindow):
         self._exit_ready = False
         self._session_ending = False
         self._tray_icon = None
-        self._browser_meeting_bridge = BrowserMeetingBridge()
+        self._browser_agent = BrowserAgentDetector(on_updated=self._browser_updated.emit)
+        self._browser_updated.connect(
+            self._browser_detection_updated, Qt.ConnectionType.QueuedConnection,
+        )
         self._calendar_meeting_detector = create_calendar_detector()
         self._native_meeting_detector = create_meeting_detector()
         self._meeting_detector = CombinedMeetingDetector(
             [
                 self._native_meeting_detector,
-                self._browser_meeting_bridge,
+                self._browser_agent,
                 self._calendar_meeting_detector,
             ]
         )
@@ -264,12 +268,11 @@ class MainWindow(QMainWindow):
     def _sync_meeting_detection(self):
         if hasattr(self, "_lifecycle"):
             self._lifecycle.configure()
+        if self.config.get("meeting_detection", False):
+            self._browser_agent.start()
+        else:
+            self._browser_agent.stop()
         if self.config.get("meeting_detection", False) or self._lifecycle.native.testing:
-            if not self._browser_meeting_bridge.start():
-                self._status_bar.showMessage(
-                    "Browser meeting detection unavailable: localhost port 8765 is busy",
-                    8000,
-                )
             if self.config.get("calendar_detection", False):
                 self._calendar_meeting_detector.start()
             else:
@@ -277,24 +280,18 @@ class MainWindow(QMainWindow):
             self._meeting_timer.start()
         else:
             self._meeting_timer.stop()
-            self._browser_meeting_bridge.stop()
+            self._browser_agent.stop()
             self._calendar_meeting_detector.stop()
             if self._meeting_prompt is not None:
                 self._meeting_prompt.close()
         self._update_browser_status()
 
     def _update_browser_status(self):
-        if not self.config.get("meeting_detection", False):
-            text = "Browser: detection off"
-        else:
-            status = self._browser_meeting_bridge.companion_status()
-            if status.connected:
-                text = "Browser: connected"
-            elif status.listening:
-                text = "Browser: not connected"
-            else:
-                text = "Browser: bridge unavailable"
-        self._browser_status_label.setText(text)
+        self._browser_status_label.setText(self._browser_agent.status().summary)
+
+    def _browser_detection_updated(self):
+        if self.config.get("meeting_detection", False) and not self._quitting:
+            self._poll_for_meeting()
 
     def _poll_for_meeting(self):
         self._lifecycle.poll()
@@ -473,7 +470,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._browser_status_label = QLabel()
         self._browser_status_label.setToolTip(
-            "The browser companion sends a local heartbeat when it is installed and enabled."
+            "Browser Agent checks enabled meeting tools every 15 seconds while detection is on."
         )
         self._status_bar.addPermanentWidget(self._browser_status_label)
 
@@ -830,8 +827,8 @@ class MainWindow(QMainWindow):
                 key: value for key, value in self._last_capture_test.items() if key != "recording"
             }
             save_config(self.config)
-        companions = self._write_pending_sidecars(path)
-        suffix = f" with {len(companions)} live transcript files" if companions else ""
+        sidecars = self._write_pending_sidecars(path)
+        suffix = f" with {len(sidecars)} live transcript files" if sidecars else ""
         self._status_bar.showMessage(f"Saved: {os.path.basename(path)}{suffix}", 5000)
         self._refresh_list()
         if not self._is_recording:
@@ -1391,7 +1388,7 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(
             self.config,
             self,
-            browser_bridge=self._browser_meeting_bridge,
+            browser_agent=self._browser_agent,
             meeting_detector=self._native_meeting_detector,
             lifecycle=self._lifecycle,
         )
@@ -1446,7 +1443,7 @@ class MainWindow(QMainWindow):
         if self._meeting_prompt is not None:
             self._meeting_prompt.close()
         self._meeting_timer.stop()
-        self._browser_meeting_bridge.stop()
+        self._browser_agent.stop()
         self._calendar_meeting_detector.stop()
         self._lifecycle.close()
         self._capture_session.close()

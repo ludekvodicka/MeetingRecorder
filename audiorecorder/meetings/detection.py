@@ -16,6 +16,7 @@ class MeetingCandidate:
     app_name: str
     title: str
     source: str = "native-window"
+    prompt_immediately: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,7 +145,8 @@ class MeetingPromptPolicy:
             return None
 
         ready = [candidate for candidate in candidates
-                 if self._counts[candidate.key] >= self._observations_required
+                 if (candidate.prompt_immediately
+                     or self._counts[candidate.key] >= self._observations_required)
                  and candidate.key not in self._prompted]
         if not ready:
             return None

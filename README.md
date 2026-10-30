@@ -113,9 +113,14 @@ Live labels are immediate aids; the later batch transcription remains more accur
 feature is off by default and adds up to two paid Soniox realtime streams.
 
 **Offers recording when a meeting appears.** On macOS, stable Teams, Zoom, Webex, and Slack
-Huddle windows produce a non-modal recording prompt. An optional least-privilege Brave/Chrome/Edge
-companion covers Google Meet, Zoom Web, and Teams Web. It can see only those meeting pages,
-has no history/tab-capture permission, and reports to `127.0.0.1` only. macOS Calendar is a
+Huddle windows produce a non-modal recording prompt. Browser Agent adds Google Meet, Zoom Web,
+and Teams Web detection in Brave and Chrome on Windows and macOS. Install Browser Agent with its
+native host, enable **Agent access** and the desired **Meetings** tools in each profile, then enable
+meeting detection in Meeting Recorder. Settings shows the profiles and enabled meeting tools.
+Meeting Recorder asks every 15 seconds over a local OS channel. Browser signals only offer a
+recording prompt, including pre-join pages; they never start or stop a recording automatically.
+See [browser detection architecture](docs/architecture/browser-agent-meetings.md).
+macOS Calendar is a
 separate opt-in signal for imminent events with attendees or a recognized conference link.
 Modern Teams is also recognized from repeated changes to its local media-stack file metadata;
 the detector does not read call logs, messages, or meeting content. Settings shows the latest
@@ -168,7 +173,7 @@ please report what you find.
 | Live subtitles (RTS Translate) | yes | yes on macOS 13+ | only with a monitor source |
 | Live speaker labels | yes | yes on macOS 13+ | only with a monitor source |
 | Native meeting popup | no | Teams, Zoom, Webex, Slack Huddles | no |
-| Browser meeting popup | optional Brave/Chrome/Edge companion | optional Brave/Chrome/Edge companion | optional Brave/Chrome/Edge companion |
+| Browser meeting popup | Browser Agent (Brave/Chrome) | Browser Agent (Brave/Chrome) | not supported |
 | Calendar meeting signal | no | opt-in through EventKit | no |
 | Dictation hotkey | yes | yes, needs Accessibility permission | X11 only, not on Wayland |
 | Paste after dictation | yes | yes, sends Cmd+V | X11, and needs `xclip` or `xsel` |
@@ -214,9 +219,8 @@ certutil -hashfile Meeting-Recorder-0.3.3-x64.exe SHA256    # Windows Command Pr
 - **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
   On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
   `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across. The DMG also
-  contains the optional unpacked browser companion and a next-meeting quick start. The app
-  keeps its own permanent companion copy: open **Settings > Reveal Companion Folder** before
-  loading it in Brave, Chrome, or Edge.
+  contains a next-meeting quick start. Install Browser Agent separately for browser meeting
+  detection.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
 
@@ -268,8 +272,9 @@ recording to Soniox, dictation streams your microphone to Soniox while you hold 
 RTS Translate streams the other side of the call to Soniox for as long as it is switched on
 and a recording is running. Live Speakers streams the microphone and system tracks to separate
 Soniox realtime sessions while its toggle and a recording are active. Meeting detection stays
-local: native window titles, optional Calendar events, and sanitized browser-companion
-heartbeats are not uploaded.
+local: native window titles, optional Calendar events, and Browser Agent meeting tab metadata
+are not uploaded. Browser Agent's enabled meeting tools query only their granted meeting sites;
+Meeting Recorder does not request other tools or page content.
 The Cleanup button runs the Claude CLI on your machine, which sends the transcript to Anthropic
 under whatever agreement your Claude account has. Read the privacy terms of both services and
 decide whether the calls you record belong there. There is no telemetry and no account of our
