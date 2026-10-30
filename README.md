@@ -293,11 +293,14 @@ certutil -hashfile Meeting-Recorder-0.5.0-x64.exe SHA256    # Windows Command Pr
 - **macOS** - a `.dmg`, **Apple Silicon only**, because that is what the build runners are.
   On an Intel Mac, build from source. Gatekeeper refuses unsigned applications, so run
   `xattr -cr "/Applications/Meeting Recorder.app"` after copying it across. The DMG also
-  contains a next-meeting quick start. Install
-  [Browser Agent](https://github.com/ludekvodicka/BrowserAgentExtension) separately for
-  browser meeting detection.
+  contains a next-meeting quick start.
 - **Linux** - an `.AppImage`, or a `.tar.gz` if you prefer to unpack it yourself. Needs
   PulseAudio or pipewire-pulse, and `xclip` or `xsel` for dictation.
+
+**Browser Agent, optional.** To get the recording offer for Google Meet, Zoom Web and Teams
+Web in Brave or Chrome on Windows and macOS, install
+[Browser Agent](https://github.com/ludekvodicka/BrowserAgentExtension) from its release.
+Recording, transcription and the other functions work without it.
 
 ## Updates
 
