@@ -210,9 +210,9 @@ Unless a release explicitly says it is notarized, its builds are unsigned. Check
 of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Meeting-Recorder-0.3.3-x64.exe                    # Linux or Git Bash
-shasum -a 256 Meeting-Recorder-0.3.3-arm64.dmg              # macOS
-certutil -hashfile Meeting-Recorder-0.3.3-x64.exe SHA256    # Windows Command Prompt
+sha256sum Meeting-Recorder-0.4.0-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.4.0-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.4.0-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
