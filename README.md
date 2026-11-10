@@ -43,6 +43,13 @@ shows **Mic muted** and the microphone meter goes flat. A recording without a sy
 source is saved as microphone-only, and the card says so instead of pretending it captured
 the call.
 
+On Windows the system track follows the call to whatever output it plays on. When Meet in
+your browser plays into Bluetooth headphones while Windows still uses the speakers, the
+recording switches to the headphones within about 5 seconds, and the system meter shows the
+new device. The system track also keeps time with the microphone through silent stretches,
+so both sides stay aligned in the saved recording. See
+[system audio follows the call](docs/architecture/output-following.md).
+
 ![A recording in progress](docs/screenshots/recording.png)
 
 Capture starts and stops outside the GUI thread. Encoding runs in a bounded background queue,
