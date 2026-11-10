@@ -377,7 +377,7 @@ please report what you find.
 | | Windows | macOS | Linux |
 | --- | --- | --- | --- |
 | Microphone recording | yes | yes, asks for permission | yes |
-| System audio | yes, straight from the default output | native on macOS 13+; BlackHole fallback | needs a `.monitor` source, see below |
+| System audio | yes, from the output the call plays on | native on macOS 13+; BlackHole fallback | needs a `.monitor` source, see below |
 | Transcription and summaries | yes | yes | yes |
 | Live subtitles (Translate) | yes | yes on macOS 13+ | only with a monitor source |
 | Live speaker labels | yes | yes on macOS 13+ | only with a monitor source |
@@ -390,7 +390,13 @@ please report what you find.
 | Paste after dictation | yes | yes, sends Cmd+V | X11, and needs `xclip` or `xsel` |
 | Tested by the maintainer | yes | no | no |
 
-**System audio.** Windows records its default output through WASAPI loopback. On macOS 13 or
+**System audio.** Windows records an output device through WASAPI loopback: the default
+output, or the device chosen as **System audio source**. During the recording it follows the
+call: when the call app or browser plays on another device, for example headphones chosen in
+Meet, the recording switches to that device within about 5 seconds. Without a known call
+app, a device that stays silent for 15 seconds while you speak is replaced by the device that
+plays. Each switch shows on the system meter and in `call-detection.log`. See
+[system audio follows the call](docs/architecture/output-following.md). On macOS 13 or
 newer, leaving the system source on **Default** uses ScreenCaptureKit and needs no virtual
 audio device. The first recording asks for Screen & System Audio Recording permission; grant
 it in System Settings > Privacy & Security and restart Meeting Recorder when macOS requests
@@ -420,9 +426,9 @@ Unless a release explicitly says it is notarized, its builds are unsigned. Check
 of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Meeting-Recorder-0.8.0-x64.exe                    # Linux or Git Bash
-shasum -a 256 Meeting-Recorder-0.8.0-arm64.dmg              # macOS
-certutil -hashfile Meeting-Recorder-0.8.0-x64.exe SHA256    # Windows Command Prompt
+sha256sum Meeting-Recorder-0.9.0-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.9.0-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.9.0-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn

@@ -22,6 +22,8 @@ class CaptureSession(QObject):
     started = pyqtSignal(object)
     stopped = pyqtSignal(object)
     failed = pyqtSignal(str, str)
+    # recording, requested device, error ("" when the system track now records the device)
+    switched = pyqtSignal(str, str, str)
     system_level = pyqtSignal(float)
     mic_level = pyqtSignal(float)
 
@@ -94,6 +96,19 @@ class CaptureSession(QObject):
         expected = config.get("_verified_sources")
         if expected is None or tuple(expected) != tuple(actual):
             raise CaptureError("Resolved audio devices changed; run Test Audio before automation")
+
+    def switch_system(self, recording, name):
+        self.executor.submit(self._switch_system, recording, name)
+
+    def _switch_system(self, recording, name):
+        if recording != self.recording or self.backend is None:
+            return
+        try:
+            self.backend.switch_system_source(name)
+            error = ""
+        except Exception as failure:
+            error = str(failure) or type(failure).__name__
+        self.switched.emit(recording, name, error)
 
     def stop(self, recording):
         self.executor.submit(self._stop, recording)

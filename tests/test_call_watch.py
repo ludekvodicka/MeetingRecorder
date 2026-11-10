@@ -158,6 +158,19 @@ def test_the_call_log_writes_only_changes_and_no_titles(tmp_path):
     ]
 
 
+def test_the_call_log_names_where_the_call_plays_and_notes_switches(tmp_path):
+    log = CallLog(tmp_path / "calls.log")
+    log.record(True, BROWSER, True, "", "Headphones")
+    log.record(True, BROWSER, True, "", "Headphones")
+    log.note("system audio now from Headphones, because the call plays there")
+
+    lines = (tmp_path / "calls.log").read_text(encoding="utf-8").splitlines()
+    assert [line.split("  ", 1)[1] for line in lines] == [
+        "call=yes  microphone=brave.exe  meeting-window=yes  call-audio=Headphones",
+        "system audio now from Headphones, because the call plays there",
+    ]
+
+
 class FakeMicrophone:
     def __init__(self):
         self.programs = set()

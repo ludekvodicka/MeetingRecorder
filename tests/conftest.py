@@ -19,11 +19,12 @@ def qt_application():
 
 @pytest.fixture(autouse=True)
 def isolate_call_watch(monkeypatch, tmp_path):
-    # The real monitor reads this computer's microphone records, and the call log would
-    # write into the user's settings folder.
+    # The real monitors read this computer's microphone records and audio sessions, and
+    # the call log would write into the user's settings folder.
     from audiorecorder.ui import main_window
 
     monkeypatch.setattr(main_window, "create_microphone_monitor", lambda: None)
+    monkeypatch.setattr(main_window, "create_output_monitor", lambda: None)
     monkeypatch.setattr(main_window, "CALL_LOG_PATH", tmp_path / "call-detection.log")
 
 

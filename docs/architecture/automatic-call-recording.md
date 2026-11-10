@@ -43,8 +43,10 @@ microphone record of `brave.exe` ran from 08:55:20 to 09:59:55, exactly the call
   ([call end prompt](call-end-prompt.md)).
 - **Log.** `meetings/call_log.py` appends one line per change to `call-detection.log` in the
   settings folder (`%LOCALAPPDATA%\AudioRecorder` on Windows): call yes/no, the programs on the
-  microphone, meeting window yes/no, and the action. No titles. It is cut to its newer half
-  past 256 KB. A missed call is explained from this file.
+  microphone, meeting window yes/no, while recording the output devices the call plays on
+  (`call-audio=`, see [system audio follows the call](output-following.md)), and the action.
+  No titles. It is cut to its newer half past 256 KB. A missed call is explained from this
+  file.
 - **Settings.** On Windows, Settings → General shows **Record calls automatically, without
   asking** (`automatic_recording`) and **Stop and save the recording when the call ends**
   (`auto_stop_recording`). They do not need meeting detection. On macOS the same keys keep

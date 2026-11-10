@@ -48,6 +48,9 @@ dependencies = [
     # WASAPI loopback lives in this PyAudio fork and exists on Windows only. Microphones
     # and explicitly routed inputs use sounddevice/PortAudio everywhere else.
     "pyaudiowpatch>=0.2.12 ; sys_platform == 'win32'",
+    # Audio sessions tell which program plays on which output device, so the system track
+    # can follow a call that plays outside the default output.
+    "pycaw>=20240210 ; sys_platform == 'win32'",
     # ScreenCaptureKit supplies native system audio on macOS. These focused framework
     # bindings keep the packaged application substantially smaller than pyobjc[all].
     "pyobjc-framework-ScreenCaptureKit>=10.3 ; sys_platform == 'darwin'",

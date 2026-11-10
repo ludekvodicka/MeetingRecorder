@@ -145,3 +145,12 @@ class TestAliasing:
         out = to_float(b"".join(sampler.feed(block) for block in in_blocks(data)))
         settled = out[100:]
         assert np.sqrt(np.mean(settled ** 2)) == pytest.approx(np.sqrt(0.5), rel=0.03)
+
+
+def test_convert_gives_float_mono_at_the_target_rate_without_int16_rounding():
+    converter = Downsampler(44100, 48000)
+    out = np.concatenate([converter.convert(np.full((441, 2), 0.3, dtype=np.float32))
+                          for _ in range(100)])
+    assert out.dtype == np.float32
+    assert len(out) == pytest.approx(48000, abs=2)
+    assert np.allclose(out, 0.3)

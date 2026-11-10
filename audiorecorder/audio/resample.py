@@ -48,6 +48,11 @@ class Downsampler:
 
     def feed(self, block):
         """A block of captured audio in, int16 bytes out. May legitimately return nothing."""
+        samples = self.convert(block)
+        return (np.clip(samples, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+
+    def convert(self, block):
+        """A block of captured audio in, mono float32 at the target rate out."""
         mono = np.asarray(block, dtype=np.float32)
         if mono.ndim > 1:
             mono = mono.mean(axis=1)
@@ -61,13 +66,13 @@ class Downsampler:
         # starting point. It waits in the buffer for the next block to give it a partner.
         if data.size < 2:
             self._pending = data
-            return b""
+            return np.zeros(0, dtype=np.float32)
 
         last_usable = data.size - 2
         count = int(np.floor((last_usable - self._position) / self._step)) + 1
         if count <= 0:
             self._pending = data
-            return b""
+            return np.zeros(0, dtype=np.float32)
 
         positions = self._position + np.arange(count) * self._step
         left = positions.astype(np.int64)
@@ -80,5 +85,4 @@ class Downsampler:
         keep_from = min(int(next_position), data.size)
         self._position = next_position - keep_from
         self._pending = data[keep_from:].copy()
-
-        return (np.clip(samples, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+        return samples.astype(np.float32)

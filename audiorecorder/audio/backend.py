@@ -4,7 +4,8 @@ Recording always has two tracks: the system output and the microphone. How the s
 output is obtained differs per platform, and that is the only thing the two backends
 disagree about:
 
-* Windows records it directly through the WASAPI loopback of the default output device.
+* Windows records it directly through the WASAPI loopback of an output device, the default
+  one unless configured, and can switch to another device during the recording.
 * macOS records it directly through ScreenCaptureKit. A virtual input such as BlackHole
   remains available as an explicitly selected compatibility path.
 * Linux records an ordinary PulseAudio or PipeWire ``.monitor`` input. Without one,
@@ -98,6 +99,14 @@ class CaptureBackend(ABC):
     @abstractmethod
     def close(self):
         """Release the audio library. The instance is unusable afterwards."""
+
+    def switch_system_source(self, name):
+        """Record the system track from another output device, into the same track.
+
+        ``name`` is a device name without the " [Loopback]" suffix. Raises CaptureError when
+        the device cannot be opened; the current device then keeps recording.
+        """
+        raise CaptureError("This backend cannot switch its system source while recording")
 
     def resolve_sources(self, system_source, mic_source):
         """Resolve names without opening audio streams for unattended-start verification."""

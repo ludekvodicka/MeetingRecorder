@@ -25,6 +25,8 @@ MEETING_APPS = frozenset({
 })
 # Store packages are recorded by package family name; new Teams is MSTeams_8wekyb3d8bbwe.
 MEETING_PACKAGES = ("msteams_",)
+# The program a meeting package plays the call through, to find it among audio sessions.
+PACKAGE_PROGRAMS = {"msteams_": "ms-teams.exe"}
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,18 @@ class MicrophoneUse:
     meeting_app: bool
     browser: bool
     programs: tuple[str, ...] = ()
+
+    @property
+    def call_programs(self):
+        """Exe names of the meeting apps and browsers on the microphone, packages mapped."""
+        found = set()
+        for name in self.programs:
+            if name in MEETING_APPS or name in BROWSERS:
+                found.add(name)
+            for prefix, program in PACKAGE_PROGRAMS.items():
+                if name.startswith(prefix):
+                    found.add(program)
+        return frozenset(found)
 
 
 def classify(programs):

@@ -80,7 +80,10 @@ def _runtime_smoke_test(platform_name=None):
 
         _make_serial_queue("org.meetingrecorder.smoke-test")
     elif platform_name == "win32":
+        import psutil  # noqa: F401
         import pyaudiowpatch  # noqa: F401
+        from pycaw.pycaw import IAudioMeterInformation, IAudioSessionControl2  # noqa: F401
+        from pycaw.utils import AudioUtilities  # noqa: F401
     elif platform_name == "linux":
         import sounddevice  # noqa: F401
     else:

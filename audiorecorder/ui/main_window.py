@@ -31,6 +31,8 @@ from audiorecorder import secrets
 from audiorecorder.api.commands import RemoteControl
 from audiorecorder.api.server import ApiServer
 from audiorecorder.audio.encoder import mix_and_encode
+from audiorecorder.audio.output_activity import create_output_monitor
+from audiorecorder.audio.output_follow import OutputFollower
 from audiorecorder.audio.runtime import capture_runtime
 from audiorecorder.audio.session import CaptureSession
 from audiorecorder.config import CONFIG_DIR, DEFAULT_SUMMARY_PROMPT, save_config
@@ -261,6 +263,12 @@ class MainWindow(QMainWindow):
         self._call_watch = CallWatch()
         self._microphone = create_microphone_monitor()
         self._call_log = CallLog(CALL_LOG_PATH)
+        # Moves the system track to the device the call plays on; None while not recording
+        # system audio or where the system source cannot switch.
+        self._outputs = create_output_monitor()
+        self._output_follower = None
+        self._output_choice = None
+        self._output_failed = set()
         # The live journal of the running recording and the text last written to it.
         self._journal_path = None
         self._journal_text = ""
@@ -330,6 +338,9 @@ class MainWindow(QMainWindow):
         self._capture_session.failed.connect(self._on_capture_error)
         self._capture_session.system_level.connect(self._level_bars.set_system_level)
         self._capture_session.mic_level.connect(self._level_bars.set_mic_level)
+        self._capture_session.system_level.connect(self._output_system_level)
+        self._capture_session.mic_level.connect(self._output_mic_level)
+        self._capture_session.switched.connect(self._output_switched)
         self._create_tray_icon()
         self._migrate_recordings()
         self._refresh_list()
@@ -828,6 +839,11 @@ class MainWindow(QMainWindow):
         self._journal_path = None if stamp is None else journal.journal_path(
             self._recording_config[result.recording]["output_dir"], stamp)
         self._call_end = CallEndWatch()
+        self._output_follower = (
+            OutputFollower(time.monotonic())
+            if system_name is not None and self._outputs is not None else None)
+        self._output_choice = None
+        self._output_failed = set()
         self._watch_call()
         self._call_timer.start()
 
@@ -933,6 +949,7 @@ class MainWindow(QMainWindow):
             self._last_capture_test["frames"] = dict(result.frames)
         system_path, mic_path = result.paths
         self._capture = None
+        self._output_follower = None
         controller.stopped(result.recording, has_audio=bool(mic_path))
         self._watch_call()
         self._stop_speaker_recognition()
@@ -1221,6 +1238,7 @@ class MainWindow(QMainWindow):
         exact = microphone is not None
         now = time.monotonic()
         present = self._call_watch.observe(microphone, meeting_shown, self._is_recording, now)
+        call_audio = self._follow_output(microphone, now)
         if self._call_end is not None:
             if self._journal_path is not None:
                 self._save_journal(
@@ -1245,7 +1263,50 @@ class MainWindow(QMainWindow):
             action = "start" if self._start_call_recording() else "start refused"
         else:
             action = ""
-        self._call_log.record(present, microphone, meeting_shown, action)
+        self._call_log.record(present, microphone, meeting_shown, action, call_audio)
+
+    def _follow_output(self, microphone, now):
+        """Move the system track to the device the call plays on; the devices it plays on."""
+        follower = self._output_follower
+        if follower is None or self._capture is None:
+            return ""
+        try:
+            outputs = self._outputs.outputs()
+        except OSError:
+            log.exception("the output devices could not be read")
+            return ""
+        programs = frozenset() if microphone is None else microphone.call_programs
+        if self._output_choice is None:
+            choice = follower.choose(self._capture.active_system_source, outputs, programs, now)
+            if choice is not None and choice.name not in self._output_failed:
+                self._output_choice = choice
+                self._capture_session.switch_system(
+                    self._lifecycle.controller.recording, choice.name)
+        return ",".join(sorted({o.name for o in outputs if programs and o.plays(programs)}))
+
+    def _output_system_level(self, level):
+        if self._output_follower is not None:
+            self._output_follower.system_level(level, time.monotonic())
+
+    def _output_mic_level(self, level):
+        if self._output_follower is not None:
+            self._output_follower.mic_level(level, time.monotonic())
+
+    def _output_switched(self, recording, name, error):
+        choice, self._output_choice = self._output_choice, None
+        if self._capture is None or recording != self._lifecycle.controller.recording:
+            return
+        why = "the call plays there" if choice and choice.reason == "call" else (
+            "the recorded device was silent while you spoke")
+        if error:
+            self._output_failed.add(name)
+            self._call_log.note(f"system audio stays, {name} could not open: {error}")
+            self._status_bar.showMessage(
+                f"System audio could not switch to {name}: {error}", 15000)
+            return
+        self._call_log.note(f"system audio now from {name}, because {why}")
+        self._level_bars.set_device_names(name, self._capture.active_mic_source)
+        self._status_bar.showMessage(f"System audio now from {name}: {why}", 15000)
 
     def _microphone_use(self):
         """Who holds the microphone, or None when this system cannot tell."""
